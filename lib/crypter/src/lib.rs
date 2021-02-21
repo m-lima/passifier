@@ -1,5 +1,9 @@
-pub type Result<T> = std::result::Result<T, Error>;
+#![deny(warnings, rust_2018_idioms, missing_docs, clippy::pedantic)]
 
+//! Allows encrypting and decrypting serde payloads with AES/GCM encryption
+
+/// Errors that can happen while serialization/deserialization, inflation/compression, and
+/// decryption/encryption
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// Failed to serialize/deserialize payload
@@ -15,6 +19,7 @@ pub enum Error {
     Inflation,
 }
 
+/// Struct holding the cipher that can be used to encrypt and decrypt payloads
 pub struct Crypter {
     cipher: aes_gcm::Aes256Gcm,
     nonce:
@@ -22,14 +27,15 @@ pub struct Crypter {
 }
 
 impl Crypter {
-    pub fn new<S: AsRef<str>>(pass: S) -> Self {
+    /// Creates a new cipher with the given passphrase
+    pub fn new<S: AsRef<str>>(passphrase: S) -> Self {
         use aes_gcm::aead::generic_array::GenericArray;
         use aes_gcm::aead::NewAead;
         use sha2::Digest;
 
         let secret = {
             let mut hasher = sha2::Sha256::new();
-            hasher.update(pass.as_ref().as_bytes());
+            hasher.update(passphrase.as_ref().as_bytes());
             hasher.finalize()
         };
 
@@ -42,11 +48,18 @@ impl Crypter {
         }
     }
 
-    pub fn encrypt<T: serde::Serialize>(&self, payload: &T) -> Result<Vec<u8>> {
+    /// Encrypts the payload
+    ///
+    /// # Errors
+    /// Can fail at any of these points:
+    /// * Serialization: [`Serde`](enum.Error.html#variant.Serde)
+    /// * Encryption: [`Crypto`](enum.Error.html#variant.Crypto)
+    pub fn encrypt<T: serde::Serialize>(&self, payload: &T) -> Result<Vec<u8>, Error> {
         use aes_gcm::aead::Aead;
 
         let binary = bincode::serialize(&payload).map_err(Error::Serde)?;
 
+        #[cfg(feature = "miniz_oxide")]
         let binary = miniz_oxide::deflate::compress_to_vec(&binary, 8);
 
         self.cipher
@@ -54,7 +67,15 @@ impl Crypter {
             .map_err(Error::Crypto)
     }
 
-    pub fn decrypt<T: serde::de::DeserializeOwned>(&self, payload: &[u8]) -> Result<T> {
+    /// Decrypts into the payload
+    ///
+    /// # Errors
+    /// Can fail at any of these points:
+    /// * Deserialization: [`Serde`](enum.Error.html#variant.Serde)
+    /// * Decryption: [`Crypto`](enum.Error.html#variant.Crypto)
+    /// * Inflation: [`Inflation`](enum.Error.html#variant.Inflation)
+    ///   * Only if feature `compression` is enabled
+    pub fn decrypt<T: serde::de::DeserializeOwned>(&self, payload: &[u8]) -> Result<T, Error> {
         use aes_gcm::aead::Aead;
 
         let decrypted: Vec<u8> = self
@@ -64,6 +85,7 @@ impl Crypter {
 
         // Allowed because the returned error is quite useless, just a number
         #[allow(clippy::map_err_ignore)]
+        #[cfg(feature = "miniz_oxide")]
         let decrypted =
             miniz_oxide::inflate::decompress_to_vec(&decrypted).map_err(|_| Error::Inflation)?;
 
