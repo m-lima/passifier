@@ -4,32 +4,43 @@ type Result<T> = super::Result<T>;
 pub struct Store(std::collections::HashMap<String, String>);
 
 impl super::Store for Store {
-    fn create(&mut self, key: String, value: String) -> Result<()> {
-        match self.0.entry(key) {
+    fn create(&mut self, name: String, value: String) -> Result<()> {
+        match self.0.entry(name) {
             std::collections::hash_map::Entry::Vacant(entry) => {
                 entry.insert(value);
                 Ok(())
             }
-            std::collections::hash_map::Entry::Occupied(_) => Err(super::Error::KeyAlreadyExists),
+            std::collections::hash_map::Entry::Occupied(_) => {
+                Err(super::Error::SecretAlreadyExists)
+            }
         }
     }
 
-    fn read<K: AsRef<str>>(&self, key: K) -> Option<&String> {
-        self.0.get(key.as_ref())
+    fn read<S: AsRef<str>>(&self, name: S) -> Option<&String> {
+        self.0.get(name.as_ref())
     }
 
-    fn update<K: AsRef<str>>(&mut self, key: K, value: String) -> Result<()> {
-        let entry = self.0.get_mut(key.as_ref()).ok_or(super::Error::NotFound)?;
+    fn update<S: AsRef<str>>(&mut self, name: S, value: String) -> Result<()> {
+        let entry = self
+            .0
+            .get_mut(name.as_ref())
+            .ok_or(super::Error::SecretNotFound)?;
         *entry = value;
         Ok(())
     }
 
-    fn delete<K: AsRef<str>>(&mut self, key: K) -> Result<String> {
-        self.0.remove(key.as_ref()).ok_or(super::Error::NotFound)
+    fn delete<S: AsRef<str>>(&mut self, name: S) -> Result<String> {
+        self.0
+            .remove(name.as_ref())
+            .ok_or(super::Error::SecretNotFound)
     }
 
-    fn list(&self) -> super::Secrets<'_> {
-        super::Secrets(self.0.keys())
+    fn secrets(&self) -> super::SecretNames<'_> {
+        super::SecretNames(self.0.keys())
+    }
+
+    fn iter(&self) -> super::Secrets<'_> {
+        super::Secrets(self.0.iter())
     }
 }
 
@@ -62,7 +73,7 @@ mod tests {
             store
                 .create(own!("existing"), own!("existing_new_value"))
                 .unwrap_err(),
-            Error::KeyAlreadyExists
+            Error::SecretAlreadyExists
         ));
         assert_eq!(store.0, reference);
 
@@ -74,7 +85,7 @@ mod tests {
             store
                 .create(own!("new"), own!("new_new_value"))
                 .unwrap_err(),
-            Error::KeyAlreadyExists
+            Error::SecretAlreadyExists
         ));
         assert_eq!(store.0, reference);
     }
@@ -94,7 +105,7 @@ mod tests {
 
         assert!(matches!(
             store.update("new", own!("new_value")).unwrap_err(),
-            Error::NotFound
+            Error::SecretNotFound
         ));
         assert_eq!(store.0, reference);
 
@@ -107,7 +118,10 @@ mod tests {
     fn delete() {
         let (mut store, mut reference) = setup();
 
-        assert!(matches!(store.delete("new").unwrap_err(), Error::NotFound));
+        assert!(matches!(
+            store.delete("new").unwrap_err(),
+            Error::SecretNotFound
+        ));
         assert_eq!(store.0, reference);
 
         assert!(store.delete("existing").is_ok());
@@ -116,7 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn list() {
+    fn secrets() {
         let store = {
             let mut map = std::collections::HashMap::new();
             map.insert(own!("foo1"), own!("bar1"));
@@ -124,7 +138,7 @@ mod tests {
             map.insert(own!("foo3"), own!("bar3"));
             Store(map)
         };
-        let list = store.list().collect::<Vec<_>>();
+        let list = store.secrets().collect::<Vec<_>>();
         assert_eq!(list.len(), 3);
         assert!(list.contains(&&own!("foo1")));
         assert!(list.contains(&&own!("foo2")));

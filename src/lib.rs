@@ -1,9 +1,6 @@
-#![deny(
-    warnings,
-    rust_2018_idioms,
-    // missing_docs,
-    clippy::pedantic,
-)]
+#![deny(warnings, rust_2018_idioms, missing_docs, clippy::pedantic)]
+
+//! Handles secrets in a secret store
 
 mod crypter;
 mod store;
@@ -11,31 +8,37 @@ mod store;
 macro_rules! impl_store {
     ($name:ty) => {
         impl Store for $name {
-            fn create(&mut self, key: String, value: String) -> Result<()> {
-                self.store.create(key, value)
+            fn create(&mut self, name: String, value: String) -> Result<()> {
+                self.store.create(name, value)
             }
 
-            fn read<K: AsRef<str>>(&self, key: K) -> Option<&String> {
-                self.store.read(key)
+            fn read<K: AsRef<str>>(&self, name: K) -> Option<&String> {
+                self.store.read(name)
             }
 
-            fn update<K: AsRef<str>>(&mut self, key: K, value: String) -> Result<()> {
-                self.store.update(key, value)
+            fn update<K: AsRef<str>>(&mut self, name: K, value: String) -> Result<()> {
+                self.store.update(name, value)
             }
 
-            fn delete<K: AsRef<str>>(&mut self, key: K) -> Result<String> {
-                self.store.delete(key)
+            fn delete<K: AsRef<str>>(&mut self, name: K) -> Result<String> {
+                self.store.delete(name)
             }
 
-            fn list(&self) -> Secrets<'_> {
-                self.store.list()
+            fn secrets(&self) -> SecretNames<'_> {
+                self.store.secrets()
+            }
+
+            fn iter(&self) -> Secrets<'_> {
+                self.store.iter()
             }
         }
     };
 }
 
+/// Conveniene alias for operations that may return an [`Error`](enum.Error.html)
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Errors that may happen
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// IO error while loading/saving secret store
@@ -46,26 +49,52 @@ pub enum Error {
     #[error("Failed to perform crypto for secret store: {0}")]
     Crypto(crypter::Error),
 
-    /// Key already exists
-    #[error("Key already exists")]
-    KeyAlreadyExists,
+    /// Secret already exists
+    #[error("Secret already exists")]
+    SecretAlreadyExists,
 
-    /// Key not found
-    #[error("Key not found")]
-    NotFound,
+    /// Secret not found
+    #[error("Secret not found")]
+    SecretNotFound,
 }
 
+/// Trait for all implementaions of a secrets store
 pub trait Store {
-    fn create(&mut self, key: String, value: String) -> Result<()>;
-    fn read<K: AsRef<str>>(&self, key: K) -> Option<&String>;
-    fn update<K: AsRef<str>>(&mut self, key: K, value: String) -> Result<()>;
-    fn delete<K: AsRef<str>>(&mut self, key: K) -> Result<String>;
-    fn list(&self) -> Secrets<'_>;
+    /// Creates a new secret in the store
+    ///
+    /// # Errors
+    /// If the secret name already exists, a
+    /// [`SecretAlreadyExists`](enum.Error.html#variant.SecretAlreadyExists) error will be returned
+    fn create(&mut self, name: String, value: String) -> Result<()>;
+
+    /// Reads a secret from the store, if it exists
+    fn read<S: AsRef<str>>(&self, name: S) -> Option<&String>;
+
+    /// Updates a secret from the store
+    ///
+    /// # Errors
+    /// If the secret name does not exist, a
+    /// [`SecretNotFound`](enum.Error.html#variant.SecretNotFound) error will be returned
+    fn update<S: AsRef<str>>(&mut self, name: S, value: String) -> Result<()>;
+
+    /// Deletes a secret from the store
+    ///
+    /// # Errors
+    /// If the secret name does not exist, a
+    /// [`SecretNotFound`](enum.Error.html#variant.SecretNotFound) error will be returned
+    fn delete<S: AsRef<str>>(&mut self, name: S) -> Result<String>;
+
+    /// An iterator over all the secret names stored
+    fn secrets(&self) -> SecretNames<'_>;
+
+    /// An iterator over all the secret name/value pairs
+    fn iter(&self) -> Secrets<'_>;
 }
 
-pub struct Secrets<'a>(std::collections::hash_map::Keys<'a, String, String>);
+/// Iterator over secret names
+pub struct SecretNames<'a>(std::collections::hash_map::Keys<'a, String, String>);
 
-impl<'a> Iterator for Secrets<'a> {
+impl<'a> Iterator for SecretNames<'a> {
     type Item = &'a String;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -73,6 +102,18 @@ impl<'a> Iterator for Secrets<'a> {
     }
 }
 
+/// Iterator over secret name/value pais
+pub struct Secrets<'a>(std::collections::hash_map::Iter<'a, String, String>);
+
+impl<'a> Iterator for Secrets<'a> {
+    type Item = (&'a String, &'a String);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+}
+
+/// Implementation of a secret store that is file-based
 pub struct FileStore {
     path: std::path::PathBuf,
     store: store::Store,
@@ -81,6 +122,11 @@ pub struct FileStore {
 impl_store!(FileStore);
 
 impl FileStore {
+    /// Loads a secret store from file
+    ///
+    /// # Errors
+    /// Any IO failure will result in an error. After reading the file, any decryption,
+    /// deserialization, and decrompression failures will result in an error.
     pub fn load<P: AsRef<std::path::Path>, S: AsRef<str>>(path: P, pass: S) -> Result<Self> {
         use std::io::Read;
 
@@ -97,6 +143,11 @@ impl FileStore {
         })
     }
 
+    /// Save the secret store back into file
+    ///
+    /// # Errors
+    /// Any encryption, serialization, and crompression failures will result in an error. After
+    /// preparing the payload, any IO failure will result in an error.
     pub fn save<S: AsRef<str>>(self, pass: S) -> Result<()> {
         use std::io::Write;
 
