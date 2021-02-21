@@ -90,6 +90,11 @@ impl Store {
         self.0.get(name.as_ref())
     }
 
+    /// Loads a secret from the store, if it exists
+    pub fn get<S: AsRef<str>>(&mut self, name: S) -> Option<&mut Entry> {
+        self.0.get_mut(name.as_ref())
+    }
+
     /// Updates a secret from the store
     ///
     /// # Errors
@@ -210,6 +215,20 @@ mod tests {
             store.read("existing").unwrap().to_string(),
             "existing_value"
         );
+        assert_eq!(store.0, reference);
+    }
+
+    #[test]
+    fn get() {
+        let (mut store, mut reference) = setup();
+        assert!(store.get("new").is_none());
+        assert_eq!(store.0, reference);
+        assert_eq!(store.get("existing").unwrap().to_string(), "existing_value");
+        assert_eq!(store.0, reference);
+
+        let entry = store.get("existing").unwrap();
+        *entry = entry!("new_value");
+        reference.insert(own!("existing"), entry!("new_value"));
         assert_eq!(store.0, reference);
     }
 
