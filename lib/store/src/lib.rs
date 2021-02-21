@@ -2,7 +2,7 @@
 
 //! Handles secrets in a secret store
 
-pub use crypter::Error as IOError;
+pub use crypter::Error as CryptoError;
 
 /// Errors that may happen
 #[derive(thiserror::Error, Debug, PartialEq, Eq, Clone, Copy)]
@@ -48,25 +48,25 @@ impl Store {
         Self(std::collections::HashMap::new())
     }
 
-    /// Load a secret store from the bytes with the given passphrase
+    /// Decrypt a secret store from bytes with the given passphrase
     ///
     /// The bytes are expected to be encrypted, compressed, and encoded in raw binary
     ///
     /// # Errors
     /// Any decryption, deserialization, and decrompression failures will result in an
-    /// [`IOError`](enum.IOError.html)
-    pub fn load<S: AsRef<str>>(data: &[u8], pass: S) -> Result<Self, IOError> {
+    /// [`CryptoError`](enum.CryptoError.html)
+    pub fn decrypt<S: AsRef<str>>(data: &[u8], pass: S) -> Result<Self, CryptoError> {
         crypter::Crypter::new(pass).decrypt(data)
     }
 
-    /// Save the secret store back into bytes with the given passphrase
+    /// Encrypt the secret store into bytes with the given passphrase
     ///
-    /// The bytes will be encrypted, compressed, and encoded in raw binary
+    /// The store will be encrypted, compressed, and encoded in raw binary
     ///
     /// # Errors
     /// Any encryption, serialization, and crompression failures will result in an
-    /// [`IOError`](enum.IOError.html)
-    pub fn save<S: AsRef<str>>(&self, pass: S) -> Result<Vec<u8>, IOError> {
+    /// [`CryptoError`](enum.CryptoError.html)
+    pub fn encrypt<S: AsRef<str>>(&self, pass: S) -> Result<Vec<u8>, CryptoError> {
         crypter::Crypter::new(pass).encrypt(self)
     }
 
@@ -265,8 +265,8 @@ mod tests {
             .create(own!("inner"), Entry::Nested(inner_store))
             .unwrap();
 
-        let bytes = store.save("mega-pass").unwrap();
-        let recovered = Store::load(&bytes, "mega-pass").unwrap();
+        let bytes = store.encrypt("mega-pass").unwrap();
+        let recovered = Store::decrypt(&bytes, "mega-pass").unwrap();
         assert_eq!(store, recovered);
     }
 }
