@@ -1,21 +1,50 @@
-// #![deny(
-//     warnings,
-//     rust_2018_idioms,
-//     // missing_docs,
-//     clippy::pedantic,
-// )]
+#![deny(
+    warnings,
+    rust_2018_idioms,
+    // missing_docs,
+    clippy::pedantic,
+)]
+
+mod crypter;
+mod store;
+
+macro_rules! impl_store {
+    ($name:ty) => {
+        impl Store for $name {
+            fn create(&mut self, key: String, value: String) -> Result<()> {
+                self.store.create(key, value)
+            }
+
+            fn read<K: AsRef<str>>(&self, key: K) -> Option<&String> {
+                self.store.read(key)
+            }
+
+            fn update<K: AsRef<str>>(&mut self, key: K, value: String) -> Result<()> {
+                self.store.update(key, value)
+            }
+
+            fn delete<K: AsRef<str>>(&mut self, key: K) -> Result<String> {
+                self.store.delete(key)
+            }
+
+            fn list(&self) -> Secrets<'_> {
+                self.store.list()
+            }
+        }
+    };
+}
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug)]
 pub enum Error {
-    /// Failed to load secret store
-    #[error("Could not load secret store")]
-    Loading,
+    /// IO error while loading/saving secret store
+    #[error("IO error: {0}")]
+    IO(std::io::Error),
 
-    /// Failed to deserialize secret store
-    #[error("Failed to deserialize secret store: {0}")]
-    Deserializing(String),
+    /// Failed to encrypt/decrypt secret store
+    #[error("Failed to perform crypto for secret store: {0}")]
+    Crypto(crypter::Error),
 
     /// Key already exists
     #[error("Key already exists")]
@@ -31,153 +60,54 @@ pub trait Store {
     fn read<K: AsRef<str>>(&self, key: K) -> Option<&String>;
     fn update<K: AsRef<str>>(&mut self, key: K, value: String) -> Result<()>;
     fn delete<K: AsRef<str>>(&mut self, key: K) -> Result<String>;
+    fn list(&self) -> Secrets<'_>;
 }
 
-struct StoreImpl {
-    map: std::collections::HashMap<String, String>,
-}
+pub struct Secrets<'a>(std::collections::hash_map::Keys<'a, String, String>);
 
-impl Store for StoreImpl {
-    fn create(&mut self, key: String, value: String) -> Result<()> {
-        match self.map.entry(key) {
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(value);
-                Ok(())
-            }
-            std::collections::hash_map::Entry::Occupied(_) => Err(Error::KeyAlreadyExists),
-        }
-    }
+impl<'a> Iterator for Secrets<'a> {
+    type Item = &'a String;
 
-    fn read<K: AsRef<str>>(&self, key: K) -> Option<&String> {
-        self.map.get(key.as_ref())
-    }
-
-    fn update<K: AsRef<str>>(&mut self, key: K, value: String) -> Result<()> {
-        let entry = self.map.get_mut(key.as_ref()).ok_or(Error::NotFound)?;
-        *entry = value;
-        Ok(())
-    }
-
-    fn delete<K: AsRef<str>>(&mut self, key: K) -> Result<String> {
-        self.map.remove(key.as_ref()).ok_or(Error::NotFound)
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
     }
 }
 
-#[cfg(test)]
-trait TestableStore: Store {
-    fn map(&mut self) -> &mut std::collections::HashMap<String, String>;
+pub struct FileStore {
+    path: std::path::PathBuf,
+    store: store::Store,
 }
 
-#[cfg(test)]
-impl TestableStore for StoreImpl {
-    fn map(&mut self) -> &mut std::collections::HashMap<String, String> {
-        &mut self.map
-    }
-}
+impl_store!(FileStore);
 
-#[cfg(test)]
-mod tests {
-    use super::Error;
-    use super::StoreImpl;
-    use super::TestableStore;
+impl FileStore {
+    pub fn load<P: AsRef<std::path::Path>, S: AsRef<str>>(path: P, pass: S) -> Result<Self> {
+        use std::io::Read;
 
-    macro_rules! own {
-        ($string:literal) => {
-            String::from($string)
-        };
-    }
+        let mut file = std::fs::File::open(path.as_ref()).map_err(Error::IO)?;
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer).map_err(Error::IO)?;
 
-    #[test]
-    fn store_impl_create() {
-        create(&mut StoreImpl {
-            map: std::collections::HashMap::new(),
-        });
+        let store = crypter::Crypter::new(pass)
+            .decrypt(&buffer)
+            .map_err(Error::Crypto)?;
+        Ok(Self {
+            path: std::path::PathBuf::from(path.as_ref()),
+            store,
+        })
     }
 
-    #[test]
-    fn store_impl_read() {
-        read(&mut StoreImpl {
-            map: std::collections::HashMap::new(),
-        });
-    }
+    pub fn save<S: AsRef<str>>(self, pass: S) -> Result<()> {
+        use std::io::Write;
 
-    #[test]
-    fn store_impl_update() {
-        update(&mut StoreImpl {
-            map: std::collections::HashMap::new(),
-        });
-    }
+        let buffer = crypter::Crypter::new(pass)
+            .encrypt(&self.store)
+            .map_err(Error::Crypto)?;
 
-    #[test]
-    fn store_impl_delete() {
-        delete(&mut StoreImpl {
-            map: std::collections::HashMap::new(),
-        });
-    }
-
-    fn setup(store: &mut impl TestableStore) -> std::collections::HashMap<String, String> {
-        store.map().clear();
-        store.map().insert(own!("existing"), own!("existing_value"));
-
-        let mut reference = std::collections::HashMap::new();
-        reference.insert(own!("existing"), own!("existing_value"));
-        reference
-    }
-
-    fn create(store: &mut impl TestableStore) {
-        let mut reference = setup(store);
-
-        assert_eq!(
-            store
-                .create(own!("existing"), own!("existing_new_value"))
-                .unwrap_err(),
-            Error::KeyAlreadyExists
-        );
-        assert_eq!(store.map(), &reference);
-
-        assert!(store.create(own!("new"), own!("new_value")).is_ok());
-        reference.insert(own!("new"), own!("new_value"));
-        assert_eq!(store.map(), &reference);
-
-        assert_eq!(
-            store
-                .create(own!("new"), own!("new_new_value"))
-                .unwrap_err(),
-            Error::KeyAlreadyExists
-        );
-        assert_eq!(store.map(), &reference);
-    }
-
-    fn read(store: &mut impl TestableStore) {
-        let reference = setup(store);
-        assert!(store.read("new").is_none());
-        assert_eq!(store.map(), &reference);
-        assert_eq!(store.read("existing").unwrap(), "existing_value");
-        assert_eq!(store.map(), &reference);
-    }
-
-    fn update(store: &mut impl TestableStore) {
-        let mut reference = setup(store);
-
-        assert_eq!(
-            store.update("new", own!("new_value")).unwrap_err(),
-            Error::NotFound
-        );
-        assert_eq!(store.map(), &reference);
-
-        assert!(store.update("existing", own!("new_value")).is_ok());
-        reference.insert(own!("existing"), own!("new_value"));
-        assert_eq!(store.map(), &reference);
-    }
-
-    fn delete(store: &mut impl TestableStore) {
-        let mut reference = setup(store);
-
-        assert_eq!(store.delete("new").unwrap_err(), Error::NotFound);
-        assert_eq!(store.map(), &reference);
-
-        assert!(store.delete("existing").is_ok());
-        reference.clear();
-        assert_eq!(store.map(), &reference);
+        std::fs::File::create(self.path)
+            .map_err(Error::IO)?
+            .write_all(&buffer)
+            .map_err(Error::IO)
+            .map(|_| ())
     }
 }
