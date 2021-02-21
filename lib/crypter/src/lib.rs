@@ -20,11 +20,7 @@ pub enum Error {
 }
 
 /// Struct holding the cipher that can be used to encrypt and decrypt payloads
-pub struct Crypter {
-    cipher: aes_gcm::Aes256Gcm,
-    nonce:
-        aes_gcm::aead::generic_array::GenericArray<u8, aes_gcm::aead::generic_array::typenum::U12>,
-}
+pub struct Crypter(aes_gcm::Aes256Gcm);
 
 impl Crypter {
     /// Creates a new cipher with the given passphrase
@@ -39,13 +35,7 @@ impl Crypter {
             hasher.finalize()
         };
 
-        let mut nonce = [0; 12];
-        nonce.copy_from_slice(&secret[..12]);
-
-        Self {
-            cipher: aes_gcm::Aes256Gcm::new(GenericArray::from_slice(&secret[..32])),
-            nonce: GenericArray::from(nonce),
-        }
+        Self(aes_gcm::Aes256Gcm::new(GenericArray::from_slice(&secret)))
     }
 
     /// Encrypts the payload
@@ -62,9 +52,20 @@ impl Crypter {
         #[cfg(feature = "miniz_oxide")]
         let binary = miniz_oxide::deflate::compress_to_vec(&binary, 8);
 
-        self.cipher
-            .encrypt(&self.nonce, binary.as_slice())
-            .map_err(Error::Crypto)
+        let nonce = {
+            use rand::RngCore;
+
+            let mut bytes = [0_u8; 12];
+            rand::thread_rng().fill_bytes(&mut bytes);
+            aes_gcm::aead::generic_array::GenericArray::from(bytes)
+        };
+
+        let data = self
+            .0
+            .encrypt(&nonce, binary.as_slice())
+            .map_err(Error::Crypto)?;
+
+        Ok(nonce.into_iter().chain(data.into_iter()).collect())
     }
 
     /// Decrypts into the payload
@@ -78,10 +79,16 @@ impl Crypter {
     pub fn decrypt<T: serde::de::DeserializeOwned>(&self, payload: &[u8]) -> Result<T, Error> {
         use aes_gcm::aead::Aead;
 
-        let decrypted: Vec<u8> = self
-            .cipher
-            .decrypt(&self.nonce, payload)
-            .map_err(Error::Crypto)?;
+        let (nonce, payload) = {
+            let mut bytes = [0_u8; 12];
+            bytes.copy_from_slice(&payload[..12]);
+            (
+                aes_gcm::aead::generic_array::GenericArray::from(bytes),
+                &payload[12..],
+            )
+        };
+
+        let decrypted: Vec<u8> = self.0.decrypt(&nonce, payload).map_err(Error::Crypto)?;
 
         // Allowed because the returned error is quite useless, just a number
         #[allow(clippy::map_err_ignore)]
@@ -99,14 +106,12 @@ mod tests {
 
     #[test]
     fn can_contruct() {
-        let crypter = Crypter::new("foobar");
-        assert!(!crypter.nonce.as_slice().iter().all(|b| b == &0));
+        Crypter::new("foobar");
     }
 
     #[test]
     fn empty_key() {
-        let crypter = Crypter::new("");
-        assert!(!crypter.nonce.as_slice().iter().all(|b| b == &0));
+        Crypter::new("");
     }
 
     #[test]
