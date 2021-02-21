@@ -17,10 +17,37 @@ pub enum StoreError {
 }
 
 /// A secret store that can be loaded from a byte array and stored back into a byte array
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]
-pub struct Store(std::collections::HashMap<String, String>);
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct Store(std::collections::HashMap<String, Entry>);
+
+/// Possible values that can be stored in the secret store
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
+pub enum Entry {
+    /// Plain string
+    String(String),
+    /// Binary data
+    Binary(Vec<u8>),
+    /// A nested secret store
+    Nested(Store),
+}
+
+impl std::fmt::Display for Entry {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::String(string) => string.fmt(fmt),
+            Self::Binary(_) => write!(fmt, "[Binary data]"),
+            Self::Nested(_) => write!(fmt, "[Nested store]"),
+        }
+    }
+}
 
 impl Store {
+    /// Creates a new empty store
+    #[must_use]
+    pub fn new() -> Self {
+        Self(std::collections::HashMap::new())
+    }
+
     /// Load a secret store from the bytes with the given passphrase
     ///
     /// The bytes are expected to be encrypted, compressed, and encoded in raw binary
@@ -48,10 +75,10 @@ impl Store {
     /// # Errors
     /// If the secret name already exists, a
     /// [`SecretAlreadyExists`](enum.StoreError.html#variant.SecretAlreadyExists) error will be returned
-    pub fn create(&mut self, name: String, value: String) -> Result<(), StoreError> {
+    pub fn create(&mut self, name: String, entry: Entry) -> Result<(), StoreError> {
         match self.0.entry(name) {
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(value);
+            std::collections::hash_map::Entry::Vacant(vacant) => {
+                vacant.insert(entry);
                 Ok(())
             }
             std::collections::hash_map::Entry::Occupied(_) => Err(StoreError::SecretAlreadyExists),
@@ -59,7 +86,7 @@ impl Store {
     }
 
     /// Reads a secret from the store, if it exists
-    pub fn read<S: AsRef<str>>(&self, name: S) -> Option<&String> {
+    pub fn read<S: AsRef<str>>(&self, name: S) -> Option<&Entry> {
         self.0.get(name.as_ref())
     }
 
@@ -68,12 +95,12 @@ impl Store {
     /// # Errors
     /// If the secret name does not exist, a
     /// [`SecretNotFound`](enum.StoreError.html#variant.SecretNotFound) error will be returned
-    pub fn update<S: AsRef<str>>(&mut self, name: S, value: String) -> Result<(), StoreError> {
+    pub fn update<S: AsRef<str>>(&mut self, name: S, new_entry: Entry) -> Result<(), StoreError> {
         let entry = self
             .0
             .get_mut(name.as_ref())
             .ok_or(StoreError::SecretNotFound)?;
-        *entry = value;
+        *entry = new_entry;
         Ok(())
     }
 
@@ -82,7 +109,7 @@ impl Store {
     /// # Errors
     /// If the secret name does not exist, a
     /// [`SecretNotFound`](enum.StoreError.html#variant.SecretNotFound) error will be returned
-    pub fn delete<S: AsRef<str>>(&mut self, name: S) -> Result<String, StoreError> {
+    pub fn delete<S: AsRef<str>>(&mut self, name: S) -> Result<Entry, StoreError> {
         self.0
             .remove(name.as_ref())
             .ok_or(StoreError::SecretNotFound)
@@ -94,14 +121,20 @@ impl Store {
     }
 
     /// An iterator over all the secret name/value pairs
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &String)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &Entry)> {
         self.0.iter()
+    }
+}
+
+impl Default for Store {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 #[cfg(test)]
 mod tests {
-
+    use super::Entry;
     use super::Store;
     use super::StoreError;
 
@@ -111,9 +144,15 @@ mod tests {
         };
     }
 
-    fn setup() -> (Store, std::collections::HashMap<String, String>) {
+    macro_rules! entry {
+        ($string:literal) => {
+            Entry::String(String::from($string))
+        };
+    }
+
+    fn setup() -> (Store, std::collections::HashMap<String, Entry>) {
         let mut reference = std::collections::HashMap::new();
-        reference.insert(own!("existing"), own!("existing_value"));
+        reference.insert(own!("existing"), entry!("existing_value"));
 
         let store = Store(reference.clone());
 
@@ -122,9 +161,9 @@ mod tests {
 
     fn new_store() -> Store {
         let mut map = std::collections::HashMap::new();
-        map.insert(own!("foo1"), own!("bar1"));
-        map.insert(own!("foo2"), own!("bar2"));
-        map.insert(own!("foo3"), own!("bar3"));
+        map.insert(own!("foo1"), entry!("bar1"));
+        map.insert(own!("foo2"), entry!("bar2"));
+        map.insert(own!("foo3"), entry!("bar3"));
         Store(map)
     }
 
@@ -134,19 +173,19 @@ mod tests {
 
         assert_eq!(
             store
-                .create(own!("existing"), own!("existing_new_value"))
+                .create(own!("existing"), entry!("existing_new_value"))
                 .unwrap_err(),
             StoreError::SecretAlreadyExists
         );
         assert_eq!(store.0, reference);
 
-        assert!(store.create(own!("new"), own!("new_value")).is_ok());
-        reference.insert(own!("new"), own!("new_value"));
+        assert!(store.create(own!("new"), entry!("new_value")).is_ok());
+        reference.insert(own!("new"), entry!("new_value"));
         assert_eq!(store.0, reference);
 
         assert_eq!(
             store
-                .create(own!("new"), own!("new_new_value"))
+                .create(own!("new"), entry!("new_new_value"))
                 .unwrap_err(),
             StoreError::SecretAlreadyExists
         );
@@ -158,7 +197,10 @@ mod tests {
         let (store, reference) = setup();
         assert!(store.read("new").is_none());
         assert_eq!(store.0, reference);
-        assert_eq!(store.read("existing").unwrap(), "existing_value");
+        assert_eq!(
+            store.read("existing").unwrap().to_string(),
+            "existing_value"
+        );
         assert_eq!(store.0, reference);
     }
 
@@ -167,13 +209,13 @@ mod tests {
         let (mut store, mut reference) = setup();
 
         assert_eq!(
-            store.update("new", own!("new_value")).unwrap_err(),
+            store.update("new", entry!("new_value")).unwrap_err(),
             StoreError::SecretNotFound
         );
         assert_eq!(store.0, reference);
 
-        assert!(store.update("existing", own!("new_value")).is_ok());
-        reference.insert(own!("existing"), own!("new_value"));
+        assert!(store.update("existing", entry!("new_value")).is_ok());
+        reference.insert(own!("existing"), entry!("new_value"));
         assert_eq!(store.0, reference);
     }
 
@@ -200,21 +242,28 @@ mod tests {
     #[test]
     fn iter() {
         let store = new_store();
-        let mut list = store.iter().collect::<Vec<_>>();
+        let mut list = store
+            .iter()
+            .map(|(k, v)| (k, v.to_string()))
+            .collect::<Vec<_>>();
         list.sort();
         assert_eq!(
             list,
             [
-                (&own!("foo1"), &own!("bar1")),
-                (&own!("foo2"), &own!("bar2")),
-                (&own!("foo3"), &own!("bar3"))
+                (&own!("foo1"), own!("bar1")),
+                (&own!("foo2"), own!("bar2")),
+                (&own!("foo3"), own!("bar3"))
             ]
         );
     }
 
     #[test]
     fn round_trip() {
-        let store = new_store();
+        let mut store = new_store();
+        let inner_store = new_store();
+        store
+            .create(own!("inner"), Entry::Nested(inner_store))
+            .unwrap();
 
         let bytes = store.save("mega-pass").unwrap();
         let recovered = Store::load(&bytes, "mega-pass").unwrap();
