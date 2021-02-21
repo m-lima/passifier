@@ -126,6 +126,15 @@ impl Store {
     }
 }
 
+impl IntoIterator for Store {
+    type Item = (String, Entry);
+    type IntoIter = std::collections::hash_map::IntoIter<String, Entry>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 impl Default for Store {
     fn default() -> Self {
         Self::new()
