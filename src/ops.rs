@@ -163,6 +163,16 @@ mod tests {
         };
     }
 
+    macro_rules! update_empty {
+        ($path:expr) => {{
+            let mut updated = make_store();
+            let mut deleted = make_store();
+            super::update(&mut updated, $path, parse!(e "{}")).unwrap();
+            super::delete(&mut deleted, $path).unwrap();
+            assert_eq!(updated, deleted);
+        }};
+    }
+
     macro_rules! delete {
         ($path:expr, $expected:literal) => {{
             let mut store = make_store();
@@ -293,6 +303,114 @@ mod tests {
         assert!(read(&store, path!["nested", "inner", "deep", "bla"]).is_err());
         assert!(read(&store, path!["nested", "inner", "deep", "foo", "bla"]).is_err());
         assert!(read(&store, path![""]).is_err());
+    }
+
+    #[test]
+    fn update() {
+        use super::update;
+
+        let mut store = make_store();
+
+        // update top level
+        update(&mut store, path!["binary"], own!(e "new")).unwrap();
+        assert_eq!(
+            store,
+            parse!(
+                r#"{
+                     "binary": "new",
+                     "nested": {
+                       "inner": {
+                         "deep": {
+                           "foo": "bar"
+                         }
+                       },
+                       "sibling": "inner_sibling"
+                     },
+                     "sibling": "outer_sibling"
+                   }"#
+            )
+        );
+
+        // update deep
+        update(
+            &mut store,
+            path!["nested", "inner", "deep", "foo"],
+            own!(e "new"),
+        )
+        .unwrap();
+        assert_eq!(
+            store,
+            parse!(
+                r#"{
+                     "binary": "new",
+                     "nested": {
+                       "inner": {
+                         "deep": {
+                           "foo": "new"
+                         }
+                       },
+                       "sibling": "inner_sibling"
+                     },
+                     "sibling": "outer_sibling"
+                   }"#
+            )
+        );
+
+        // update root of deep tree
+        update(&mut store, path!["nested"], own!(e "new")).unwrap();
+        assert_eq!(
+            store,
+            parse!(
+                r#"{
+                     "binary": "new",
+                     "nested": "new",
+                     "sibling": "outer_sibling"
+                   }"#
+            )
+        );
+    }
+
+    #[test]
+    fn update_empty_just_deletes() {
+        update_empty!(path!["binary"]);
+        update_empty!(path!["sibling"]);
+        update_empty!(path!["nested"]);
+        update_empty!(path!["nested", "sibling"]);
+        update_empty!(path!["nested", "inner"]);
+        update_empty!(path!["nested", "inner", "deep"]);
+        update_empty!(path!["nested", "inner", "deep", "foo"]);
+    }
+
+    #[test]
+    fn update_not_found() {
+        use super::update;
+
+        let mut store = make_store();
+
+        assert!(update(&mut store, path!["bla"], own!(e "")).is_err());
+        assert!(update(&mut store, path!["binary", "245"], own!(e "")).is_err());
+        assert!(update(&mut store, path!["nested", "bla"], own!(e "")).is_err());
+        assert!(update(&mut store, path!["nested", "bla", "foo"], own!(e "")).is_err());
+        assert!(update(&mut store, path!["nested", "inner", "bla"], own!(e "")).is_err());
+        assert!(update(
+            &mut store,
+            path!["nested", "inner", "bla", "deep"],
+            own!(e "")
+        )
+        .is_err());
+        assert!(update(
+            &mut store,
+            path!["nested", "inner", "deep", "bla"],
+            own!(e "")
+        )
+        .is_err());
+        assert!(update(
+            &mut store,
+            path!["nested", "inner", "deep", "foo", "bla"],
+            own!(e "")
+        )
+        .is_err());
+        assert!(update(&mut store, path![""], own!(e "")).is_err());
     }
 
     #[test]
