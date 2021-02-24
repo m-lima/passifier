@@ -4,11 +4,11 @@ mod args;
 mod json;
 mod ops;
 
-// fn save_to_file<P: AsRef<std::path::Path>>(data: &[u8], path: P) -> Result<(), std::io::Error> {
-//     use std::io::Write;
+fn save_to_file<P: AsRef<std::path::Path>>(data: &[u8], path: P) -> Result<(), std::io::Error> {
+    use std::io::Write;
 
-//     std::fs::File::create(path)?.write_all(data).map(|_| ())
-// }
+    std::fs::File::create(path)?.write_all(data).map(|_| ())
+}
 
 fn read_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Vec<u8>, std::io::Error> {
     use std::io::Read;
@@ -18,25 +18,6 @@ fn read_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Vec<u8>, std::io
     file.read_to_end(&mut buffer)?;
     Ok(buffer)
 }
-
-// fn create() -> anyhow::Result<store::Store> {
-//     let mut store = store::Store::new();
-//     store.create(
-//         String::from("aws"),
-//         store::Entry::String(String::from("foobar")),
-//     )?;
-
-//     store.create(String::from("nested"), store::Entry::Nested(store.clone()))?;
-//     store.create(
-//         String::from("binary"),
-//         store::Entry::Binary(store.encrypt("foo")?),
-//     )?;
-//     Ok(store)
-// }
-
-// fn to_entry(path: &[String]) -> (String, store::Entry) {
-//     path[1..].r
-// }
 
 fn main() -> anyhow::Result<()> {
     use clap::Clap;
@@ -50,7 +31,7 @@ fn main() -> anyhow::Result<()> {
                 let password = rpassword::prompt_password_stderr("Password: ")?;
                 store::Store::decrypt(&data, password)?
             }
-            args::Source::S3(path) => {
+            args::Source::S3(_) => {
                 anyhow::bail!("S3 not yet implemented")
             }
         }
@@ -59,7 +40,9 @@ fn main() -> anyhow::Result<()> {
     };
 
     match arguments.action() {
-        args::Action::Create(entry) => println!("Create => {:?}", entry),
+        args::Action::Create(entry) => {
+            ops::create(&mut store, entry.path(), entry.secret().clone().into())?
+        }
         args::Action::Read(path) => {
             let json = json::Entry::from(ops::read(&store, path.path())?.clone());
             println!("{}", serde_json::to_string(&json)?);
@@ -67,7 +50,7 @@ fn main() -> anyhow::Result<()> {
         args::Action::Update(entry) => println!("Update => {:?}", entry),
         args::Action::Delete(path) => ops::delete(&mut store, path.path())?,
         args::Action::Print(print) => {
-            let store = json::Store::from(store);
+            let store = json::Store::from(store.clone());
 
             let json = if print.pretty() {
                 serde_json::to_string_pretty(&store)?
@@ -76,6 +59,18 @@ fn main() -> anyhow::Result<()> {
             };
 
             println!("{}", json);
+        }
+    }
+
+    if let Some(save) = arguments.save() {
+        match save {
+            args::Source::File(path) => {
+                let password = rpassword::prompt_password_stderr("Password: ")?;
+                save_to_file(&store.encrypt(password)?, path)?;
+            }
+            args::Source::S3(_) => {
+                anyhow::bail!("S3 not yet implemented")
+            }
         }
     }
 

@@ -1,6 +1,6 @@
 - [ ] Implement "update"
 - [ ] Update with empty Nested is same as delete
-- [ ] Implement save
+- [ ] Avoid clones
 - [ ] Implement "S3"
 - [ ] Consider implement piping
 - [ ] Implement to directory
@@ -13,4 +13,5 @@
 - [X] Implement "create"
 - [X] Dont create empty Nested
 - [X] Remove "delete_helper"
+- [X] Implement save
 
