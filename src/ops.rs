@@ -134,6 +134,14 @@ mod tests {
         };
     }
 
+    macro_rules! delete {
+        ($path:expr, $expected:literal) => {{
+            let mut store = make_store();
+            super::delete(&mut store, $path).unwrap();
+            assert_eq!(store, parse!($expected));
+        }};
+    }
+
     fn make_store() -> store::Store {
         parse!(MAP)
     }
@@ -258,15 +266,9 @@ mod tests {
         assert!(read(&store, path![""]).is_err());
     }
 
-    fn delete_helper(path: &[String], expected: &'static str) {
-        let mut store = make_store();
-        super::delete(&mut store, path).unwrap_or_else(|err| panic!("{:?}: {}", path, err));
-        assert_eq!(store, parse!(expected), "{:?}", path);
-    }
-
     #[test]
     fn delete() {
-        delete_helper(
+        delete!(
             path!["binary"],
             r#"{
                  "nested": {
@@ -278,10 +280,10 @@ mod tests {
                    "sibling": "inner_sibling"
                  },
                  "sibling": "outer_sibling"
-               }"#,
+               }"#
         );
 
-        delete_helper(
+        delete!(
             path!["sibling"],
             r#"{
                  "binary": [ 245, 107, 95, 100 ],
@@ -293,18 +295,18 @@ mod tests {
                    },
                    "sibling": "inner_sibling"
                  }
-               }"#,
+               }"#
         );
 
-        delete_helper(
+        delete!(
             path!["nested"],
             r#"{
                  "binary": [ 245, 107, 95, 100 ],
                  "sibling": "outer_sibling"
-               }"#,
+               }"#
         );
 
-        delete_helper(
+        delete!(
             path!["nested", "sibling"],
             r#"{
                  "binary": [ 245, 107, 95, 100 ],
@@ -316,10 +318,10 @@ mod tests {
                    }
                  },
                  "sibling": "outer_sibling"
-               }"#,
+               }"#
         );
 
-        delete_helper(
+        delete!(
             path!["nested", "inner"],
             r#"{
                  "binary": [ 245, 107, 95, 100 ],
@@ -327,10 +329,10 @@ mod tests {
                    "sibling": "inner_sibling"
                  },
                  "sibling": "outer_sibling"
-               }"#,
+               }"#
         );
 
-        delete_helper(
+        delete!(
             path!["nested", "inner", "deep"],
             r#"{
                  "binary": [ 245, 107, 95, 100 ],
@@ -338,10 +340,10 @@ mod tests {
                    "sibling": "inner_sibling"
                  },
                  "sibling": "outer_sibling"
-               }"#,
+               }"#
         );
 
-        delete_helper(
+        delete!(
             path!["nested", "inner", "deep", "foo"],
             r#"{
                  "binary": [ 245, 107, 95, 100 ],
@@ -349,7 +351,7 @@ mod tests {
                    "sibling": "inner_sibling"
                  },
                  "sibling": "outer_sibling"
-               }"#,
+               }"#
         );
     }
 

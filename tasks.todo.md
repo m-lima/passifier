@@ -1,4 +1,3 @@
-- [ ] Remove "delete_helper"
 - [ ] Implement "update"
 - [ ] Update with empty Nested is same as delete
 - [ ] Implement save
@@ -13,4 +12,5 @@
 - [ ] Remove panics
 - [X] Implement "create"
 - [X] Dont create empty Nested
+- [X] Remove "delete_helper"
 
