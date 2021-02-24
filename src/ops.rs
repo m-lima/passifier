@@ -72,6 +72,35 @@ pub fn read<'a>(root: &'a store::Store, path: &[String]) -> anyhow::Result<&'a s
     read_inner(root, path.valid()?).ok_or_else(|| anyhow::anyhow!("Not found"))
 }
 
+pub fn update(root: &mut store::Store, path: &[String], entry: store::Entry) -> anyhow::Result<()> {
+    fn update_inner<'r, 'p>(
+        root: &'r mut store::Store,
+        path: &'p [String],
+    ) -> anyhow::Result<(&'r mut store::Store, &'p String)> {
+        if path.len() == 1 {
+            Ok((root, &path[0]))
+        } else if let Some(store::Entry::Nested(_)) = root.read(&path[0]) {
+            if let Some(store::Entry::Nested(inner)) = root.get(&path[0]) {
+                update_inner(inner, &path[1..])
+            } else {
+                unreachable!();
+            }
+        } else {
+            Err(anyhow::anyhow!("Not found"))
+        }
+    }
+
+    if let store::Entry::Nested(ref inner) = entry {
+        if inner.secrets().next().is_none() {
+            return delete(root, path);
+        }
+    }
+
+    let (root, path) = update_inner(root, path.valid()?)?;
+    root.update(path.clone(), entry)?;
+    Ok(())
+}
+
 pub fn delete(root: &mut store::Store, path: &[String]) -> anyhow::Result<()> {
     fn delete_inner(root: &mut store::Store, path: &[String]) -> anyhow::Result<bool> {
         fn delete_nested(root: &mut store::Store, path: &[String]) -> anyhow::Result<bool> {

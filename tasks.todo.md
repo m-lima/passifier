@@ -1,6 +1,8 @@
-- [ ] Implement "update"
+- [ ] Test "update"
 - [ ] Update with empty Nested is same as delete
 - [ ] Implement "S3"
+- [ ] Create, delete, update make no sense without output
+- [ ] Read, print make no sense with "--save"
 - [ ] Consider implement piping
 - [ ] Implement to directory
 - [ ] Implement from directory
@@ -15,3 +17,8 @@
 - [X] Clippy
 - [X] Avoid clones
 - [X] Test arg parsing
+- [X] Implement "update"
+
+
+"-s" takes optional parameter. If none is given, sabe back using same source/password. If "-s" is missing completely, pipe. Piping can be binary, json, or pretty json
+

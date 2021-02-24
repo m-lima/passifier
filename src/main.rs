@@ -1,7 +1,6 @@
 #![deny(warnings, rust_2018_idioms, clippy::pedantic)]
 
 mod args;
-// mod json;
 mod ops;
 
 fn save_to_file<P: AsRef<std::path::Path>>(data: &[u8], path: P) -> Result<(), std::io::Error> {
@@ -22,7 +21,6 @@ fn read_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Vec<u8>, std::io
 fn main() -> anyhow::Result<()> {
     use clap::Clap;
     let arguments = args::Args::parse();
-    // println!("{:?}", arguments);
 
     let mut store = if let Some(source) = arguments.store {
         match source {
@@ -45,7 +43,7 @@ fn main() -> anyhow::Result<()> {
             let entry = ops::read(&store, path.path.as_ref())?;
             println!("{}", serde_json::to_string(&entry)?);
         }
-        args::Action::Update(entry) => println!("Update => {:?}", entry),
+        args::Action::Update(entry) => ops::update(&mut store, entry.path.as_ref(), entry.secret)?,
         args::Action::Delete(path) => ops::delete(&mut store, path.path.as_ref())?,
         args::Action::Print(print) => {
             let json = if print.pretty {
