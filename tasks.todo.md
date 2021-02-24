@@ -1,4 +1,3 @@
-- [ ] Dont create empty Nested
 - [ ] Remove "delete_helper"
 - [ ] Implement "update"
 - [ ] Update with empty Nested is same as delete
@@ -13,4 +12,5 @@
 - [ ] Clippy
 - [ ] Remove panics
 - [X] Implement "create"
+- [X] Dont create empty Nested
 
