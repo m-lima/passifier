@@ -1,5 +1,8 @@
-- [*] Implement "create"
+- [ ] Dont create empty Nested
+- [ ] Remove "delete_helper"
 - [ ] Implement "update"
+- [ ] Update with empty Nested is same as delete
+- [ ] Implement save
 - [ ] Implement "S3"
 - [ ] Consider implement piping
 - [ ] Implement to directory
@@ -7,4 +10,7 @@
 - [ ] Make directory a "source"
 - [ ] QT frontend
 - [ ] Web frontend
+- [ ] Clippy
+- [ ] Remove panics
+- [X] Implement "create"
 

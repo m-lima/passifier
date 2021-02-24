@@ -125,6 +125,9 @@ mod tests {
         ($string:literal) => {
             String::from($string)
         };
+        (e $string:literal) => {
+            store::Entry::String(String::from($string))
+        };
     }
 
     macro_rules! path {
@@ -139,6 +142,9 @@ mod tests {
                 .unwrap()
                 .into()
         };
+        (e $string:literal) => {
+            store::Entry::Nested(parse!($string))
+        };
     }
 
     fn make_store() -> store::Store {
@@ -146,7 +152,65 @@ mod tests {
     }
 
     #[test]
-    fn create() {}
+    fn create() {
+        let mut store = store::Store::new();
+
+        super::create(&mut store, path!["new"], own!(e "new_value")).unwrap();
+        assert_eq!(store, parse!(r#"{"new":"new_value"}"#));
+
+        super::create(&mut store, path!["foo"], own!(e "new_value")).unwrap();
+        assert_eq!(store, parse!(r#"{"new":"new_value","foo":"new_value"}"#));
+
+        super::create(&mut store, path!["nested"], parse!(e "{}")).unwrap();
+        assert_eq!(
+            store,
+            parse!(r#"{"new":"new_value","foo":"new_value","nested":{}}"#)
+        );
+
+        super::create(&mut store, path!["nested", "inner", "foo"], parse!(e "{}")).unwrap();
+        assert_eq!(
+            store,
+            parse!(r#"{"new":"new_value","foo":"new_value","nested":{"inner":{"foo":{}}}}"#)
+        );
+
+        super::create(&mut store, path!["nested", "other", "foo"], parse!(e "{}")).unwrap();
+        assert_eq!(
+            store,
+            parse!(
+                r#"{"new":"new_value","foo":"new_value","nested":{"inner":{"foo":{}},"other":{"foo":{}}}}"#
+            )
+        );
+
+        super::create(
+            &mut store,
+            path!["nested", "other", "foo", "deep", "deeper"],
+            own!(e "here"),
+        )
+        .unwrap();
+        assert_eq!(
+            store,
+            parse!(
+                r#"{"new":"new_value","foo":"new_value","nested":{"inner":{"foo":{}},"other":{"foo":{"deep":{"deeper":"here"}}}}}"#
+            )
+        );
+    }
+
+    #[test]
+    fn create_conflict() {
+        let mut store = make_store();
+
+        assert!(super::create(&mut store, path!["binary"], own!(e "new_value")).is_err());
+        assert!(super::create(&mut store, path!["nested"], own!(e "new_value")).is_err());
+        assert!(
+            super::create(&mut store, path!["nested", "sibling"], own!(e "new_value")).is_err()
+        );
+        assert!(super::create(
+            &mut store,
+            path!["nested", "sibling", "deep"],
+            own!(e "new_value")
+        )
+        .is_err());
+    }
 
     #[test]
     fn read() {
@@ -164,22 +228,22 @@ mod tests {
 
         assert_eq!(
             super::read(&store, path!["nested", "inner"]).unwrap(),
-            &store::Entry::Nested(parse!(r#"{"deep":{"foo":"bar"}}"#))
+            &parse!(e r#"{"deep":{"foo":"bar"}}"#)
         );
 
         assert_eq!(
             super::read(&store, path!["nested", "inner", "deep"]).unwrap(),
-            &store::Entry::Nested(parse!(r#"{"foo":"bar"}"#))
+            &parse!(e r#"{"foo":"bar"}"#)
         );
 
         assert_eq!(
             super::read(&store, path!["nested", "inner", "deep", "foo"]).unwrap(),
-            &store::Entry::String(own!("bar"))
+            &own!(e "bar")
         );
 
         assert_eq!(
             super::read(&store, path!["nested", "sibling"]).unwrap(),
-            &store::Entry::String(own!("inner_sibling"))
+            &own!(e "inner_sibling")
         );
 
         assert_eq!(
@@ -189,7 +253,7 @@ mod tests {
 
         assert_eq!(
             super::read(&store, path!["sibling"]).unwrap(),
-            &store::Entry::String(own!("outer_sibling"))
+            &own!(e "outer_sibling")
         );
     }
 
