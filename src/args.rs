@@ -105,10 +105,11 @@ impl std::str::FromStr for Entries {
         let entries = string
             .split('.')
             .filter_map(|s| {
-                if s.is_empty() {
+                let trimmed = s.trim();
+                if trimmed.is_empty() {
                     None
                 } else {
-                    Some(String::from(s))
+                    Some(String::from(trimmed))
                 }
             })
             .collect::<Vec<_>>();
