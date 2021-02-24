@@ -1,4 +1,3 @@
-- [ ] Test arg parsing
 - [ ] Implement "update"
 - [ ] Update with empty Nested is same as delete
 - [ ] Implement "S3"
@@ -15,4 +14,4 @@
 - [X] Implement save
 - [X] Clippy
 - [X] Avoid clones
-
+- [X] Test arg parsing

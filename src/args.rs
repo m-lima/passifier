@@ -81,7 +81,7 @@ fn parse_entry(string: &str) -> anyhow::Result<store::Entry> {
     if string
         .split_whitespace()
         .next()
-        .map(|s| s.starts_with('{') || s.starts_with('['))
+        .map(|s| s.starts_with('{') || s.starts_with('[') || s.starts_with('"'))
         .ok_or_else(|| anyhow::anyhow!("Empty secret"))?
     {
         let mut entry = serde_json::from_str(string)?;
@@ -141,5 +141,35 @@ impl std::str::FromStr for Source {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn parse_entry() {}
+    fn parse_entry() {
+        assert_eq!(
+            super::parse_entry("foobar").unwrap(),
+            store::Entry::String(String::from("foobar"))
+        );
+
+        assert_eq!(
+            super::parse_entry("\"foobar\"").unwrap(),
+            store::Entry::String(String::from("foobar"))
+        );
+
+        assert_eq!(
+            super::parse_entry(" \n\t\r \"foobar\"").unwrap(),
+            store::Entry::String(String::from("foobar"))
+        );
+
+        assert_eq!(
+            super::parse_entry("[1, 2]").unwrap(),
+            store::Entry::Binary(vec![1, 2])
+        );
+
+        assert_eq!(
+            super::parse_entry("\n{\n}").unwrap(),
+            store::Entry::Nested(store::Store::new())
+        );
+
+        assert_eq!(
+            super::parse_entry(r#"{"nested":{"inner":{}}}"#).unwrap(),
+            store::Entry::Nested(store::Store::new())
+        );
+    }
 }
