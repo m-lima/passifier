@@ -1,6 +1,6 @@
+- [ ] Test arg parsing
 - [ ] Implement "update"
 - [ ] Update with empty Nested is same as delete
-- [ ] Avoid clones
 - [ ] Implement "S3"
 - [ ] Consider implement piping
 - [ ] Implement to directory
@@ -8,10 +8,11 @@
 - [ ] Make directory a "source"
 - [ ] QT frontend
 - [ ] Web frontend
-- [ ] Clippy
 - [ ] Remove panics
 - [X] Implement "create"
 - [X] Dont create empty Nested
 - [X] Remove "delete_helper"
 - [X] Implement save
+- [X] Clippy
+- [X] Avoid clones
 

@@ -125,7 +125,7 @@ mod tests {
 
     macro_rules! parse {
         ($string:expr) => {
-            serde_json::from_str::<super::super::json::Store>($string)
+            serde_json::from_str::<store::Store>($string)
                 .unwrap()
                 .into()
         };

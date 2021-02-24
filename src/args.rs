@@ -2,29 +2,15 @@
 #[clap(name = "Passify", version)]
 pub struct Args {
     #[clap(subcommand)]
-    action: Action,
+    pub action: Action,
 
     /// Load secret store from INPUT
     #[clap(name = "INPUT")]
-    store: Option<Source>,
+    pub store: Option<Source>,
 
     /// Save the store to OUTPUT
     #[clap(short, long, name = "OUTPUT")]
-    save: Option<Source>,
-}
-
-impl Args {
-    pub fn action(&self) -> &Action {
-        &self.action
-    }
-
-    pub fn store(&self) -> Option<&Source> {
-        self.store.as_ref()
-    }
-
-    pub fn save(&self) -> Option<&Source> {
-        self.save.as_ref()
-    }
+    pub save: Option<Source>,
 }
 
 #[derive(clap::Clap, Debug)]
@@ -49,52 +35,60 @@ pub enum Action {
 pub struct Print {
     /// Pretty print
     #[clap(short, long)]
-    pretty: bool,
-}
-
-impl Print {
-    pub fn pretty(&self) -> bool {
-        self.pretty
-    }
+    pub pretty: bool,
 }
 
 #[derive(clap::Clap, Debug)]
 pub struct Path {
     /// Path to the secret
-    path: Entries,
-}
-
-impl Path {
-    pub fn path(&self) -> &[String] {
-        &self.path.0
-    }
+    pub path: Entries,
 }
 
 #[derive(clap::Clap, Debug)]
 pub struct Entry {
     /// Path to the secret
-    path: Entries,
+    pub path: Entries,
 
     /// Value for the secret
-    secret: super::json::Entry,
-}
-
-impl Entry {
-    pub fn path(&self) -> &[String] {
-        &self.path.0
-    }
-
-    pub fn secret(&self) -> &super::json::Entry {
-        &self.secret
-    }
+    #[clap( parse(try_from_str = parse_entry))]
+    pub secret: store::Entry,
 }
 
 #[derive(Debug)]
-struct Entries(Vec<String>);
+pub struct Entries(Vec<String>);
 
 impl AsRef<[String]> for Entries {
     fn as_ref(&self) -> &[String] {
         &self.0
+    }
+}
+
+fn parse_entry(string: &str) -> anyhow::Result<store::Entry> {
+    fn remove_empties(entry: &mut store::Entry) -> bool {
+        if let store::Entry::Nested(nested) = entry {
+            let secrets = nested.secrets().map(String::from).collect::<Vec<_>>();
+            for secret in secrets {
+                if remove_empties(nested.get(&secret).unwrap()) {
+                    nested.delete(&secret).unwrap();
+                }
+            }
+            nested.secrets().next().is_none()
+        } else {
+            false
+        }
+    }
+
+    if string
+        .split_whitespace()
+        .next()
+        .map(|s| s.starts_with('{') || s.starts_with('['))
+        .ok_or_else(|| anyhow::anyhow!("Empty secret"))?
+    {
+        let mut entry = serde_json::from_str(string)?;
+        remove_empties(&mut entry);
+        Ok(entry)
+    } else {
+        Ok(store::Entry::String(String::from(string)))
     }
 }
 
@@ -142,4 +136,10 @@ impl std::str::FromStr for Source {
             Ok(Self::File(std::path::PathBuf::from_str(string)?))
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn parse_entry() {}
 }

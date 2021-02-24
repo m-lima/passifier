@@ -5,6 +5,6 @@ authors = ["Marcelo Lima <marcelowind@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-crypter = { path = "../crypter", features = [ "compress" ] }
+crypter = { path = "../crypter" }
 serde = { version = "1", features = [ "derive" ] }
 thiserror = "1"

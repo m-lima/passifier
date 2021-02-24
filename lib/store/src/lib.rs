@@ -22,6 +22,7 @@ pub struct Store(std::collections::HashMap<String, Entry>);
 
 /// Possible values that can be stored in the secret store
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
+#[serde(untagged)]
 pub enum Entry {
     /// Plain string
     String(String),

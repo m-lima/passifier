@@ -1,7 +1,7 @@
-// #![deny(warnings, rust_2018_idioms, clippy::pedantic)]
+#![deny(warnings, rust_2018_idioms, clippy::pedantic)]
 
 mod args;
-mod json;
+// mod json;
 mod ops;
 
 fn save_to_file<P: AsRef<std::path::Path>>(data: &[u8], path: P) -> Result<(), std::io::Error> {
@@ -24,7 +24,7 @@ fn main() -> anyhow::Result<()> {
     let arguments = args::Args::parse();
     // println!("{:?}", arguments);
 
-    let mut store = if let Some(source) = arguments.store() {
+    let mut store = if let Some(source) = arguments.store {
         match source {
             args::Source::File(path) => {
                 let data = read_from_file(path)?;
@@ -39,20 +39,16 @@ fn main() -> anyhow::Result<()> {
         store::Store::new()
     };
 
-    match arguments.action() {
-        args::Action::Create(entry) => {
-            ops::create(&mut store, entry.path(), entry.secret().clone().into())?
-        }
+    match arguments.action {
+        args::Action::Create(entry) => ops::create(&mut store, entry.path.as_ref(), entry.secret)?,
         args::Action::Read(path) => {
-            let json = json::Entry::from(ops::read(&store, path.path())?.clone());
-            println!("{}", serde_json::to_string(&json)?);
+            let entry = ops::read(&store, path.path.as_ref())?;
+            println!("{}", serde_json::to_string(&entry)?);
         }
         args::Action::Update(entry) => println!("Update => {:?}", entry),
-        args::Action::Delete(path) => ops::delete(&mut store, path.path())?,
+        args::Action::Delete(path) => ops::delete(&mut store, path.path.as_ref())?,
         args::Action::Print(print) => {
-            let store = json::Store::from(store.clone());
-
-            let json = if print.pretty() {
+            let json = if print.pretty {
                 serde_json::to_string_pretty(&store)?
             } else {
                 serde_json::to_string(&store)?
@@ -62,7 +58,7 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    if let Some(save) = arguments.save() {
+    if let Some(save) = arguments.save {
         match save {
             args::Source::File(path) => {
                 let password = rpassword::prompt_password_stderr("Password: ")?;

@@ -6,9 +6,13 @@
 /// decryption/encryption
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    /// Failed to serialize/deserialize payload
-    #[error("Could not serialize/deserialize payload: {0}")]
-    Serde(Box<bincode::ErrorKind>),
+    /// Failed to serialize payload
+    #[error("Could not serialize payload: {0}")]
+    Serialize(rmp_serde::encode::Error),
+
+    /// Failed to deserialize payload
+    #[error("Could not deserialize payload: {0}")]
+    Deserialize(rmp_serde::decode::Error),
 
     /// Failed to encrypt/decrypt payload
     #[error("Failed to encrypt/decrypt payload: {0}")]
@@ -47,7 +51,10 @@ impl Crypter {
     pub fn encrypt<T: serde::Serialize>(&self, payload: &T) -> Result<Vec<u8>, Error> {
         use aes_gcm::aead::Aead;
 
-        let binary = bincode::serialize(&payload).map_err(Error::Serde)?;
+        let mut binary = Vec::new();
+        payload
+            .serialize(&mut rmp_serde::Serializer::new(&mut binary))
+            .map_err(Error::Serialize)?;
 
         #[cfg(feature = "miniz_oxide")]
         let binary = miniz_oxide::deflate::compress_to_vec(&binary, 8);
@@ -96,7 +103,7 @@ impl Crypter {
         let decrypted =
             miniz_oxide::inflate::decompress_to_vec(&decrypted).map_err(|_| Error::Inflation)?;
 
-        bincode::deserialize(&decrypted).map_err(Error::Serde)
+        rmp_serde::from_read_ref(&decrypted).map_err(Error::Deserialize)
     }
 }
 
