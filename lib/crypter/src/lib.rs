@@ -7,10 +7,12 @@
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// Failed to serialize payload
+    #[cfg(feature = "serialize")]
     #[error("Could not serialize payload: {0}")]
     Serialize(rmp_serde::encode::Error),
 
     /// Failed to deserialize payload
+    #[cfg(feature = "serialize")]
     #[error("Could not deserialize payload: {0}")]
     Deserialize(rmp_serde::decode::Error),
 
@@ -19,6 +21,7 @@ pub enum Error {
     Crypto(aes_gcm::Error),
 
     /// Failed to inflate payload
+    #[cfg(feature = "miniz_oxide")]
     #[error("Failed to inflate payload")]
     Inflation,
 }
@@ -48,6 +51,7 @@ impl Crypter {
     /// Can fail at any of these points:
     /// * Serialization: [`Serde`](enum.Error.html#variant.Serde)
     /// * Encryption: [`Crypto`](enum.Error.html#variant.Crypto)
+    #[cfg(feature = "serialize")]
     pub fn encrypt<T: serde::Serialize>(&self, payload: &T) -> Result<Vec<u8>, Error> {
         use aes_gcm::aead::Aead;
 
@@ -75,6 +79,27 @@ impl Crypter {
         Ok(nonce.into_iter().chain(data.into_iter()).collect())
     }
 
+    /// Encrypts the payload
+    ///
+    /// # Errors
+    /// * Encryption: [`Crypto`](enum.Error.html#variant.Crypto)
+    #[cfg(not(feature = "serialize"))]
+    pub fn encrypt(&self, payload: &[u8]) -> Result<Vec<u8>, Error> {
+        use aes_gcm::aead::Aead;
+
+        let nonce = {
+            use rand::RngCore;
+
+            let mut bytes = [0_u8; 12];
+            rand::thread_rng().fill_bytes(&mut bytes);
+            aes_gcm::aead::generic_array::GenericArray::from(bytes)
+        };
+
+        let data = self.0.encrypt(&nonce, payload).map_err(Error::Crypto)?;
+
+        Ok(nonce.into_iter().chain(data.into_iter()).collect())
+    }
+
     /// Decrypts into the payload
     ///
     /// # Errors
@@ -83,6 +108,7 @@ impl Crypter {
     /// * Decryption: [`Crypto`](enum.Error.html#variant.Crypto)
     /// * Inflation: [`Inflation`](enum.Error.html#variant.Inflation)
     ///   * Only if feature `compression` is enabled
+    #[cfg(feature = "serialize")]
     pub fn decrypt<T: serde::de::DeserializeOwned>(&self, payload: &[u8]) -> Result<T, Error> {
         use aes_gcm::aead::Aead;
 
@@ -105,6 +131,26 @@ impl Crypter {
 
         rmp_serde::from_read_ref(&decrypted).map_err(Error::Deserialize)
     }
+
+    /// Decrypts into the payload
+    ///
+    /// # Errors
+    /// * Decryption: [`Crypto`](enum.Error.html#variant.Crypto)
+    #[cfg(not(feature = "serialize"))]
+    pub fn decrypt(&self, payload: &[u8]) -> Result<Vec<u8>, Error> {
+        use aes_gcm::aead::Aead;
+
+        let (nonce, payload) = {
+            let mut bytes = [0_u8; 12];
+            bytes.copy_from_slice(&payload[..12]);
+            (
+                aes_gcm::aead::generic_array::GenericArray::from(bytes),
+                &payload[12..],
+            )
+        };
+
+        self.0.decrypt(&nonce, payload).map_err(Error::Crypto)
+    }
 }
 
 #[cfg(test)]
@@ -122,6 +168,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "serialize")]
     fn round_trip() {
         let mut map = std::collections::HashMap::new();
         map.insert(String::from("foo"), 123_i32);
@@ -134,5 +181,17 @@ mod tests {
             .unwrap();
 
         assert_eq!(map, decrypted);
+    }
+
+    #[test]
+    #[cfg(not(feature = "serialize"))]
+    fn round_trip() {
+        const MAP: &str = "This is a string";
+
+        let crypter = Crypter::new("foo\u{1f1e7}\u{1f1f7}\u{1f1f3}\u{1f1f4}bar");
+        let encrypted = crypter.encrypt(MAP.as_bytes()).unwrap();
+        let decrypted = crypter.decrypt(&encrypted).unwrap();
+
+        assert_eq!(MAP, unsafe { std::str::from_utf8_unchecked(&decrypted) });
     }
 }
