@@ -1,0 +1,19 @@
+[package]
+name = "nested_map"
+version = "0.1.0"
+authors = ["Marcelo Lima <marcelowind@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+crypter = { path = "../crypter" }
+serde = { version = "1", features = [ "derive" ], optional = true }
+thiserror = "1"
+
+[dev_dependencies]
+rmp-serde = "0.15"
+serde =  "1"
+serde_json = "1"
+
+[features]
+default = []
+flatten = [ "serde" ]
