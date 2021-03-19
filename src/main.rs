@@ -1,50 +1,41 @@
 #![deny(warnings, rust_2018_idioms, clippy::pedantic)]
 
 mod args;
-mod ops;
+mod io;
+// mod ops;
 
-fn save_to_file<P: AsRef<std::path::Path>>(data: &[u8], path: P) -> Result<(), std::io::Error> {
-    use std::io::Write;
+type Store = nested_map::NestedMap<String, Entry>;
 
-    std::fs::File::create(path)?.write_all(data).map(|_| ())
-}
-
-fn read_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Vec<u8>, std::io::Error> {
-    use std::io::Read;
-
-    let mut file = std::fs::File::open(path)?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
-    Ok(buffer)
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
+#[serde(untagged)]
+enum Entry {
+    String(String),
+    Binary(Vec<u8>),
 }
 
 fn main() -> anyhow::Result<()> {
     use clap::Clap;
     let arguments = args::Args::parse();
 
-    let mut store = if let Some(source) = arguments.store {
+    let store = if let Some(source) = arguments.store {
         match source {
-            args::Source::File(path) => {
-                let data = read_from_file(path)?;
-                let password = rpassword::prompt_password_stderr("Password: ")?;
-                store::Store::decrypt(&data, password)?
-            }
+            args::Source::File(path) => io::load(path)?,
             args::Source::S3(_) => {
                 anyhow::bail!("S3 not yet implemented")
             }
         }
     } else {
-        store::Store::new()
+        Store::new()
     };
 
     match arguments.action {
-        args::Action::Create(entry) => ops::create(&mut store, entry.path.as_ref(), entry.secret)?,
+        // args::Action::Create(entry) => ops::create(&mut store, entry.path.as_ref(), entry.secret)?,
         args::Action::Read(path) => {
-            let entry = ops::read(&store, path.path.as_ref())?;
+            let entry = store.get_from_iter(path.iter());
             println!("{}", serde_json::to_string(&entry)?);
         }
-        args::Action::Update(entry) => ops::update(&mut store, entry.path.as_ref(), entry.secret)?,
-        args::Action::Delete(path) => ops::delete(&mut store, path.path.as_ref())?,
+        // args::Action::Update(entry) => ops::update(&mut store, entry.path.as_ref(), entry.secret)?,
+        // args::Action::Delete(path) => ops::delete(&mut store, path.path.as_ref())?,
         args::Action::Print(print) => {
             let json = if print.pretty {
                 serde_json::to_string_pretty(&store)?
@@ -54,14 +45,12 @@ fn main() -> anyhow::Result<()> {
 
             println!("{}", json);
         }
+        _ => eprintln!("Unimplemented"),
     }
 
     if let Some(save) = arguments.save {
         match save {
-            args::Source::File(path) => {
-                let password = rpassword::prompt_password_stderr("Password: ")?;
-                save_to_file(&store.encrypt(password)?, path)?;
-            }
+            args::Source::File(path) => io::save(&store, path)?,
             args::Source::S3(_) => {
                 anyhow::bail!("S3 not yet implemented")
             }

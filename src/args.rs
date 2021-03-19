@@ -44,6 +44,12 @@ pub struct Path {
     pub path: Entries,
 }
 
+impl Path {
+    pub fn iter(&self) -> impl Iterator<Item = &String> {
+        self.path.0.iter()
+    }
+}
+
 #[derive(clap::Clap, Debug)]
 pub struct Entry {
     /// Path to the secret
@@ -54,14 +60,14 @@ pub struct Entry {
     pub secret: store::Entry,
 }
 
-#[derive(Debug)]
-pub struct Entries(Vec<String>);
-
-impl AsRef<[String]> for Entries {
-    fn as_ref(&self) -> &[String] {
-        &self.0
+impl Entry {
+    pub fn iter(&self) -> impl Iterator<Item = &String> {
+        self.path.0.iter()
     }
 }
+
+#[derive(Debug)]
+pub struct Entries(Vec<String>);
 
 fn parse_entry(string: &str) -> anyhow::Result<store::Entry> {
     fn remove_empties(entry: &mut store::Entry) -> bool {
