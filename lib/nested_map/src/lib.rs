@@ -40,27 +40,6 @@ where
 
     // [ ] get_last_path
 
-    // #[inline]
-    // pub fn entry_from_iter<I>(
-    //     &mut self,
-    //     mut iter: I,
-    // ) -> std::collections::hash_map::Entry<'_, K, Entry<K, V, S>>
-    // where
-    //     I: Iterator<Item = K>,
-    // {
-    //     let mut root = self.entry(iter.next().expect("empty iterator"));
-    //     for key in iter {
-    //         if let std::collections::hash_map::Entry::Occupied(entry) = root {
-    //             if let Entry::Nested(nested) = entry.get_mut() {
-    //                 root = nested.entry(key)
-    //             }
-    //         } else {
-    //             return root;
-    //         }
-    //     }
-    //     root
-    // }
-
     #[inline]
     pub fn get_from<'a, P, Q: ?Sized>(&self, path: P) -> Option<&Entry<K, V, S>>
     where
@@ -134,27 +113,14 @@ where
             if peekable.peek().is_none() {
                 break key;
             }
-            if let Entry::Nested(nested) = root.get_mut(key)? {
-                root = nested;
+            if let Entry::Branch(branch) = root.get_mut(key)? {
+                root = branch;
             } else {
                 return None;
             }
         };
         root.remove(last)
     }
-
-    // pub fn get_last_path<Q>(&self, path: &[Q]) -> Option<&Entry<K, V, S>>
-    // where
-    //     K: std::borrow::Borrow<Q>,
-    //     Q: Eq + std::hash::Hash,
-    // {
-    //     path.iter()
-    //         .scan(None, |acc: &mut Option<&Entry<K, V, S>>, curr| {
-    //             *acc = acc.map_or_else(|| self.get(curr), |nested| nested.get(curr));
-    //             *acc
-    //         })
-    //         .last()
-    // }
 }
 
 impl<K, V, S> std::ops::Deref for NestedMap<K, V, S> {
@@ -224,9 +190,9 @@ where
 #[derive(Clone)]
 pub enum Entry<K, V, S = std::collections::hash_map::RandomState> {
     /// A node containing `V`
-    Node(V),
+    Leaf(V),
     /// A sub map
-    Nested(NestedMap<K, V, S>),
+    Branch(NestedMap<K, V, S>),
 }
 
 impl<K, V, S> Entry<K, V, S>
@@ -235,115 +201,41 @@ where
     S: std::hash::BuildHasher,
 {
     /// Gets a reference to the value form `key` from this entry if it is a nested entry
-    ///
-    /// # Errors
-    /// If this entry is not a nested entry
-    /// If the key is not found
     pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&Self>
     where
         K: std::borrow::Borrow<Q>,
         Q: Eq + std::hash::Hash,
     {
-        if let Self::Nested(nested) = self {
-            nested.get(key)
+        if let Self::Branch(branch) = self {
+            branch.get(key)
         } else {
             None
         }
     }
 
-    ///// Gets a reference to the value form `key` from this entry if it is a nested entry
-    /////
-    ///// # Errors
-    ///// If this entry is not a nested entry
-    ///// If the key is not found
-    //pub fn get<Q>(&self, key: &Q) -> Result<&Self, Error>
-    //where
-    //    K: std::borrow::Borrow<Q>,
-    //    Q: Eq + std::hash::Hash,
-    //{
-    //    if let Self::Nested(nested) = self {
-    //        nested.get(key).ok_or(Error::NotFound)
-    //    } else {
-    //        Err(Error::NotNested)
-    //    }
-    //}
-
-    ///// Gets a mutable reference to the value form `key` from this entry if it is a nested entry
-    /////
-    ///// # Errors
-    ///// If this entry is not a nested entry
-    ///// If the key is not found
-    //pub fn get_mut<Q: ?Sized>(&mut self, key: &Q) -> Result<&mut Self, Error>
-    //where
-    //    K: std::borrow::Borrow<Q>,
-    //    Q: Eq + std::hash::Hash,
-    //{
-    //    if let Self::Nested(nested) = self {
-    //        nested.get_mut(key).ok_or(Error::NotFound)
-    //    } else {
-    //        Err(Error::NotNested)
-    //    }
-    //}
-
     /// Gets a mutable reference to the value form `key` from this entry if it is a nested entry
-    ///
-    /// # Errors
-    /// If this entry is not a nested entry
-    /// If the key is not found
     pub fn get_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<&mut Self>
     where
         K: std::borrow::Borrow<Q>,
         Q: Eq + std::hash::Hash,
     {
-        if let Self::Nested(nested) = self {
-            nested.get_mut(key)
+        if let Self::Branch(branch) = self {
+            branch.get_mut(key)
         } else {
             None
         }
     }
-
-    // pub fn as_node(&self) -> Option<&V> {
-    //     if let Self::Node(node) = self {
-    //         Some(node)
-    //     } else {
-    //         None
-    //     }
-    // }
-
-    // pub fn as_node_mut(&mut self) -> Option<&mut V> {
-    //     if let Self::Node(node) = self {
-    //         Some(node)
-    //     } else {
-    //         None
-    //     }
-    // }
-
-    // pub fn as_nested(&self) -> Option<&NestedMap<K, V, S>> {
-    //     if let Self::Nested(nested) = self {
-    //         Some(nested)
-    //     } else {
-    //         None
-    //     }
-    // }
-
-    // pub fn as_nested_mut(&mut self) -> Option<&mut NestedMap<K, V, S>> {
-    //     if let Self::Nested(nested) = self {
-    //         Some(nested)
-    //     } else {
-    //         None
-    //     }
-    // }
 }
 
 impl<K, V, S> From<V> for Entry<K, V, S> {
     fn from(value: V) -> Self {
-        Self::Node(value)
+        Self::Leaf(value)
     }
 }
 
 impl<K, V, S> From<NestedMap<K, V, S>> for Entry<K, V, S> {
-    fn from(value: NestedMap<K, V, S>) -> Self {
-        Self::Nested(value)
+    fn from(map: NestedMap<K, V, S>) -> Self {
+        Self::Branch(map)
     }
 }
 
@@ -355,16 +247,16 @@ where
 {
     fn eq(&self, other: &Entry<K, V, S>) -> bool {
         match self {
-            Self::Node(node) => {
-                if let Self::Node(other_node) = other {
-                    node.eq(other_node)
+            Self::Leaf(leaf) => {
+                if let Self::Leaf(other_leaf) = other {
+                    leaf.eq(other_leaf)
                 } else {
                     false
                 }
             }
-            Self::Nested(nested) => {
-                if let Self::Nested(other_nested) = other {
-                    nested.eq(other_nested)
+            Self::Branch(branch) => {
+                if let Self::Branch(other_branch) = other {
+                    branch.eq(other_branch)
                 } else {
                     false
                 }
@@ -388,8 +280,8 @@ where
 {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Node(node) => node.fmt(fmt),
-            Self::Nested(nested) => nested.fmt(fmt),
+            Self::Leaf(leaf) => leaf.fmt(fmt),
+            Self::Branch(branch) => branch.fmt(fmt),
         }
     }
 }
@@ -404,8 +296,8 @@ where
 
     #[inline]
     fn index(&self, key: &Q) -> &Self::Output {
-        if let Self::Nested(nested) = self {
-            &nested[key]
+        if let Self::Branch(branch) = self {
+            &branch[key]
         } else {
             panic!("no entry found for key")
         }
@@ -415,7 +307,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        Entry::{Nested, Node},
+        Entry::{Branch, Leaf},
         NestedMap,
     };
 
@@ -429,7 +321,7 @@ mod tests {
     fn entry_from_node() {
         let mut map = NestedMap::new();
         assert_eq!(map.insert("key", "value".into()), None);
-        assert_eq!(map.get("key"), Some(&Node("value")));
+        assert_eq!(map.get("key"), Some(&Leaf("value")));
     }
 
     #[test]
@@ -438,7 +330,7 @@ mod tests {
         let mut inner = NestedMap::new();
         inner.insert("inner_key", "inner_value".into());
         map.insert("key", inner.clone().into());
-        assert_eq!(map.get("key"), Some(&Nested(inner)));
+        assert_eq!(map.get("key"), Some(&Branch(inner)));
     }
 
     #[test]
@@ -452,15 +344,40 @@ mod tests {
         map.insert(own!("nested"), inner.clone().into());
 
         assert_eq!(map.get_from::<&[&String], String>(&[]), None);
-        assert_eq!(map.get_from(["key"]), Some(&Node("value")));
+        assert_eq!(map.get_from(["key"]), Some(&Leaf("value")));
         assert_eq!(map.get_from(["fake"]), None);
-        assert_eq!(map.get_from(["nested"]), Some(&Nested(inner)));
+        assert_eq!(map.get_from(["nested"]), Some(&Branch(inner)));
         assert_eq!(map.get_from(["nested", "fake"]), None);
         assert_eq!(
             map.get_from(["nested", "inner_key"]),
-            Some(&Node("inner_value"))
+            Some(&Leaf("inner_value"))
         );
         assert_eq!(map.get_from(["nested", "inner_key", "not_nested"]), None);
+    }
+
+    #[test]
+    fn get_mut_from() {
+        let mut map = NestedMap::new();
+        map.insert(own!("key"), "value".into());
+
+        let mut inner = NestedMap::new();
+        inner.insert(own!("inner_key"), "inner_value".into());
+
+        map.insert(own!("nested"), inner.clone().into());
+
+        assert_eq!(map.get_mut_from::<&[&String], String>(&[]), None);
+        assert_eq!(map.get_mut_from(["key"]), Some(&mut Leaf("value")));
+        assert_eq!(map.get_mut_from(["fake"]), None);
+        assert_eq!(map.get_mut_from(["nested"]), Some(&mut Branch(inner)));
+        assert_eq!(map.get_mut_from(["nested", "fake"]), None);
+        assert_eq!(
+            map.get_mut_from(["nested", "inner_key"]),
+            Some(&mut Leaf("inner_value"))
+        );
+        assert_eq!(
+            map.get_mut_from(["nested", "inner_key", "not_nested"]),
+            None
+        );
     }
 
     #[test]
@@ -479,11 +396,11 @@ mod tests {
         assert_eq!(map.remove_from(["nested", "inner_key", "too_deep"]), None);
         assert_eq!(
             map.remove_from(["nested", "inner_key"]),
-            Some(Node("inner_value"))
+            Some(Leaf("inner_value"))
         );
         assert_eq!(map.remove_from(["nested", "inner_key"]), None);
-        assert_eq!(map.remove_from(["nested2"]), Some(Nested(inner.clone())));
-        assert_eq!(map.remove_from(["key"]), Some(Node("value")));
+        assert_eq!(map.remove_from(["nested2"]), Some(Branch(inner.clone())));
+        assert_eq!(map.remove_from(["key"]), Some(Leaf("value")));
     }
 
     // TODO: Move to docs
@@ -498,20 +415,20 @@ mod tests {
         assert_eq!(map.get_from::<&[&str], str>(&[]), None);
 
         // Slice
-        assert_eq!(map.get_from([&own!("key")]), Some(&Node("value")));
-        assert_eq!(map.get_from(["key"]), Some(&Node("value")));
+        assert_eq!(map.get_from([&own!("key")]), Some(&Leaf("value")));
+        assert_eq!(map.get_from(["key"]), Some(&Leaf("value")));
 
         // Slice reference
-        assert_eq!(map.get_from(&[&own!("key")]), Some(&Node("value")));
-        assert_eq!(map.get_from(&["key"]), Some(&Node("value")));
+        assert_eq!(map.get_from(&[&own!("key")]), Some(&Leaf("value")));
+        assert_eq!(map.get_from(&["key"]), Some(&Leaf("value")));
 
         // Vec
-        assert_eq!(map.get_from(vec![&own!("key")]), Some(&Node("value")));
-        assert_eq!(map.get_from(vec!["key"]), Some(&Node("value")));
+        assert_eq!(map.get_from(vec![&own!("key")]), Some(&Leaf("value")));
+        assert_eq!(map.get_from(vec!["key"]), Some(&Leaf("value")));
 
         // Vec reference
-        assert_eq!(map.get_from(&vec![&own!("key")]), Some(&Node("value")));
-        assert_eq!(map.get_from(&vec!["key"]), Some(&Node("value")));
+        assert_eq!(map.get_from(&vec![&own!("key")]), Some(&Leaf("value")));
+        assert_eq!(map.get_from(&vec!["key"]), Some(&Leaf("value")));
 
         // Iterator
         assert_eq!(
@@ -521,32 +438,7 @@ mod tests {
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty())
             ),
-            Some(&Node("value"))
+            Some(&Leaf("value"))
         );
     }
-
-    // #[test]
-    // fn get_mut_from() {
-    //     let mut map = NestedMap::new();
-    //     map.insert_node(own!("key"), "value");
-
-    //     let mut inner = NestedMap::new();
-    //     inner.insert_node(own!("inner_key"), "inner_value");
-
-    //     map.insert_map(own!("nested"), inner.clone());
-
-    //     assert_eq!(map.get_mut_from::<&[&String], String>(&[]), None);
-    //     assert_eq!(map.get_mut_from(&["key"]), Some(&mut Node("value")));
-    //     assert_eq!(map.get_mut_from(&["fake"]), None);
-    //     assert_eq!(map.get_mut_from(&["nested"]), Some(&mut Nested(inner)));
-    //     assert_eq!(map.get_mut_from(&["nested", "fake"]), None);
-    //     assert_eq!(
-    //         map.get_mut_from(&["nested", "inner_key"]),
-    //         Some(&mut Node("inner_value"))
-    //     );
-    //     assert_eq!(
-    //         map.get_mut_from(&["nested", "inner_key", "not_nested"]),
-    //         None
-    //     );
-    // }
 }

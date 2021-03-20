@@ -46,15 +46,15 @@ where
     {
         #[cfg(feature = "flatten")]
         match self {
-            Self::Node(node) => node.serialize(serializer),
-            Self::Nested(nested) => nested.serialize(serializer),
+            Self::Leaf(leaf) => leaf.serialize(serializer),
+            Self::Branch(branch) => branch.serialize(serializer),
         }
 
         #[cfg(not(feature = "flatten"))]
         match self {
-            Self::Node(node) => serializer.serialize_newtype_variant("Entry", 0, "Node", node),
-            Self::Nested(nested) => {
-                serializer.serialize_newtype_variant("Entry", 1, "Nested", nested)
+            Self::Leaf(leaf) => serializer.serialize_newtype_variant("Entry", 0, "Leaf", leaf),
+            Self::Branch(branch) => {
+                serializer.serialize_newtype_variant("Entry", 1, "Branch", branch)
             }
         }
     }
@@ -93,7 +93,7 @@ where
         //     type Value = NestedMap<K, V, S>;
 
         //     fn expecting(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        //         fmt.write_str("`Entry::Nested`")
+        //         fmt.write_str("`Entry::Branch`")
         //     }
 
         //     fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
@@ -121,7 +121,7 @@ where
         //     type Value = V;
 
         //     fn expecting(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        //         fmt.write_str("`Entry::Node`")
+        //         fmt.write_str("`Entry::Leaf`")
         //     }
 
         //     fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -140,17 +140,17 @@ where
         //         std::marker::PhantomData::<S>,
         //         std::marker::PhantomData::<&'d ()>,
         //     ))
-        //     .map(Entry::Nested)
+        //     .map(Entry::Branch)
         //     .or_else(|_| {
         //         deserializer
         //             .deserialize_newtype_struct(
-        //                 "Node",
+        //                 "Leaf",
         //                 NodeVisitor(
         //                     std::marker::PhantomData::<V>,
         //                     std::marker::PhantomData::<&'d ()>,
         //                 ),
         //             )
-        //             .map(Entry::Node)
+        //             .map(Entry::Leaf)
         //     })
 
         let content =
@@ -161,19 +161,19 @@ where
                 Err(err) => return Err(err),
             };
 
-        if let Ok(node) =
+        if let Ok(leaf) =
             V::deserialize(serde::__private::de::ContentRefDeserializer::<DE::Error>::new(&content))
-                .map(Self::Node)
+                .map(Self::Leaf)
         {
-            return Ok(node);
+            return Ok(leaf);
         }
 
-        if let Ok(nested) = <NestedMap<K, V, S> as serde::Deserialize<'d>>::deserialize(
+        if let Ok(branch) = <NestedMap<K, V, S> as serde::Deserialize<'d>>::deserialize(
             serde::__private::de::ContentRefDeserializer::<DE::Error>::new(&content),
         )
-        .map(Self::Nested)
+        .map(Self::Branch)
         {
-            return Ok(nested);
+            return Ok(branch);
         }
 
         Err(serde::de::Error::custom(
@@ -188,18 +188,18 @@ where
         DE: serde::Deserializer<'d>,
     {
         enum EntryType {
-            Node,
-            Nested,
+            Leaf,
+            Branch,
         }
 
         struct EntryTypeVisitor;
-        const VARIANTS: [&str; 2] = ["Node", "Nested"];
+        const VARIANTS: [&str; 2] = ["Leaf", "Branch"];
 
         impl<'d> serde::de::Visitor<'d> for EntryTypeVisitor {
             type Value = EntryType;
 
             fn expecting(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                fmt.write_str("`Node` or `Nested`")
+                fmt.write_str("`Leaf` or `Branch`")
             }
 
             fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
@@ -207,8 +207,8 @@ where
                 E: serde::de::Error,
             {
                 match value {
-                    0 => Ok(EntryType::Node),
-                    1 => Ok(EntryType::Nested),
+                    0 => Ok(EntryType::Leaf),
+                    1 => Ok(EntryType::Branch),
                     _ => Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Unsigned(value),
                         &"variant index 0 <= i < 2",
@@ -221,8 +221,8 @@ where
                 E: serde::de::Error,
             {
                 match value {
-                    "Node" => Ok(EntryType::Node),
-                    "Nested" => Ok(EntryType::Nested),
+                    "Leaf" => Ok(EntryType::Leaf),
+                    "Branch" => Ok(EntryType::Branch),
                     _ => Err(serde::de::Error::unknown_variant(value, &VARIANTS)),
                 }
             }
@@ -232,8 +232,8 @@ where
                 E: serde::de::Error,
             {
                 match value {
-                    b"Node" => Ok(EntryType::Node),
-                    b"Nested" => Ok(EntryType::Nested),
+                    b"Leaf" => Ok(EntryType::Leaf),
+                    b"Branch" => Ok(EntryType::Branch),
                     _ => {
                         let value_str = String::from_utf8_lossy(value);
                         Err(serde::de::Error::unknown_variant(&value_str, &VARIANTS))
@@ -278,12 +278,12 @@ where
                 A: serde::de::EnumAccess<'d>,
             {
                 match value.variant()? {
-                    (EntryType::Node, node) => {
-                        serde::de::VariantAccess::newtype_variant::<V>(node).map(Entry::Node)
+                    (EntryType::Leaf, leaf) => {
+                        serde::de::VariantAccess::newtype_variant::<V>(leaf).map(Entry::Leaf)
                     }
-                    (EntryType::Nested, nested) => {
-                        serde::de::VariantAccess::newtype_variant::<NestedMap<K, V, S>>(nested)
-                            .map(Entry::Nested)
+                    (EntryType::Branch, branch) => {
+                        serde::de::VariantAccess::newtype_variant::<NestedMap<K, V, S>>(branch)
+                            .map(Entry::Branch)
                     }
                 }
             }
@@ -305,37 +305,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::NestedMap;
-
-    // trait Value<'d, V>
-    // where
-    //     V: std::fmt::Debug + Eq + Clone + PartialEq + serde::Serialize + serde::Deserialize<'d>,
-    // {
-    //     fn string(value: &str) -> super::Entry<String, V>;
-    //     fn vec(value: &[u8]) -> super::Entry<String, V>;
-    // }
-
-    // fn round_trip<'d, V, T>()
-    // where
-    //     V: std::fmt::Debug + Eq + Clone + PartialEq + serde::Serialize + serde::Deserialize<'d>,
-    //     T: Value<'d, V>,
-    // {
-    //     let mut map = NestedMap::<String, V>::new();
-    //     let inner = {
-    //         let mut map = NestedMap::<String, V>::new();
-    //         map.insert(String::from("inner_string"), T::string("inner_value"));
-    //         map.insert(String::from("inner_vec"), T::vec(&[1, 2, 3]));
-    //         map
-    //     };
-    //     map.insert(String::from("nested"), inner.into());
-    //     map.insert(String::from("outer_string"), T::string("outer_value"));
-    //     map.insert(String::from("outer_vec"), T::vec(&[4, 5, 6]));
-
-    //     let json = serde_json::to_string(&map).unwrap();
-    //     let recovered: NestedMap<String, V> = serde_json::from_str(json.as_str())
-    //         .map(Clone::clone)
-    //         .unwrap();
-    //     assert_eq!(map, recovered);
-    // }
 
     #[test]
     fn serde_typed_json() {
