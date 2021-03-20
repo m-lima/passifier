@@ -10,7 +10,6 @@ mod serde;
 /// A nested hash map
 // [ ] entry
 // [ ] get_key_value
-// [ ] insert
 // [ ] retain
 // [ ] into_keys
 // [x] contains_key
@@ -18,6 +17,7 @@ mod serde;
 // [x] get_mut
 // [x] remove
 // [x] remove_entry
+// [x] insert
 
 // [ ] get_last_path
 #[derive(Clone)]
@@ -38,9 +38,22 @@ impl<K, V> NestedMap<K, V, std::collections::hash_map::RandomState>
 where
     K: Eq + std::hash::Hash,
 {
-    pub fn insert_into<I, N>(&mut self, iter: I, node: N) -> Option<Node<K, V>>
+    #[inline]
+    pub fn insert_into<'a, P, Q: ?Sized, N>(&mut self, path: P, node: N) -> Option<Node<K, V>>
     where
-        I: DoubleEndedIterator<Item = K>,
+        K: std::borrow::Borrow<Q> + From<&'a Q>,
+        Q: 'a + Eq + std::hash::Hash,
+        P: AsRef<[&'a Q]>,
+        N: Into<Node<K, V>>,
+    {
+        self.insert_into_iter(path.as_ref().iter().map(Clone::clone), node)
+    }
+
+    pub fn insert_into_iter<'a, Q: ?Sized, I, N>(&mut self, iter: I, node: N) -> Option<Node<K, V>>
+    where
+        K: std::borrow::Borrow<Q> + From<&'a Q>,
+        Q: 'a + Eq + std::hash::Hash,
+        I: DoubleEndedIterator<Item = &'a Q>,
         N: Into<Node<K, V>>,
     {
         let mut iter = iter.peekable();
@@ -58,7 +71,7 @@ where
             }
         };
 
-        root.insert(last, Node::from_path(iter, node))
+        root.insert(last.into(), Node::from_path(iter, node))
     }
 }
 
@@ -347,22 +360,26 @@ where
     K: Eq + std::hash::Hash,
 {
     #[inline]
-    fn from_path<I, N>(iter: I, node: N) -> Self
+    fn from_path<'a, Q: ?Sized, I, N>(iter: I, node: N) -> Self
     where
-        I: DoubleEndedIterator<Item = K>,
+        K: std::borrow::Borrow<Q> + From<&'a Q>,
+        Q: 'a + Eq + std::hash::Hash,
+        I: DoubleEndedIterator<Item = &'a Q>,
         N: Into<Node<K, V>>,
     {
         Self::from_path_rev(iter.rev(), node)
     }
 
-    fn from_path_rev<I, N>(iter: I, node: N) -> Self
+    fn from_path_rev<'a, Q: ?Sized, I, N>(iter: I, node: N) -> Self
     where
-        I: Iterator<Item = K>,
+        K: std::borrow::Borrow<Q> + From<&'a Q>,
+        Q: 'a + Eq + std::hash::Hash,
+        I: Iterator<Item = &'a Q>,
         N: Into<Node<K, V>>,
     {
         iter.fold(node.into(), |acc, curr| {
             let mut branch = NestedMap::<K, V>::new();
-            branch.insert(curr, acc);
+            branch.insert(curr.into(), acc);
             Self::Branch(branch)
         })
     }
@@ -477,8 +494,8 @@ mod tests {
     #[test]
     fn node_from_path() {
         assert_eq!(
-            Node::<String, &'static str>::from_path(vec![].into_iter(), "value"),
-            Node::<String, &'static str>::Leaf("value")
+            Node::<&str, &str>::from_path(Vec::<&str>::new().into_iter(), "value"),
+            Node::Leaf("value")
         );
 
         let mut map = NestedMap::<&str, &str>::new();
@@ -605,12 +622,12 @@ mod tests {
         let mut reference = NestedMap::new();
 
         let expected = reference.insert("key", "value".into());
-        let returned = map.insert_into(vec!["key"].into_iter(), "value");
+        let returned = map.insert_into(["key"], "value");
         assert_eq!(returned, expected);
         assert_eq!(map, reference);
 
         let expected = reference.insert("key", "new".into());
-        let returned = map.insert_into(vec!["key"].into_iter(), "new");
+        let returned = map.insert_into(["key"], "new");
         assert_eq!(returned, expected);
         assert_eq!(map, reference);
 
@@ -619,7 +636,7 @@ mod tests {
             inner.insert("inner_key", "inner_value".into());
             reference.insert("nested", inner.clone().into())
         };
-        let returned = map.insert_into(vec!["nested", "inner_key"].into_iter(), "inner_value");
+        let returned = map.insert_into(["nested", "inner_key"], "inner_value");
         assert_eq!(returned, expected);
         assert_eq!(map, reference);
 
@@ -636,10 +653,7 @@ mod tests {
                 unreachable!();
             }
         };
-        let returned = map.insert_into(
-            vec!["nested", "shallow", "mid", "deep", "key"].into_iter(),
-            "value",
-        );
+        let returned = map.insert_into(["nested", "shallow", "mid", "deep", "key"], "value");
         assert_eq!(returned, expected);
         assert_eq!(map, reference);
 
@@ -650,7 +664,7 @@ mod tests {
                 unreachable!();
             }
         };
-        let returned = map.insert_into(vec!["nested", "shallow"].into_iter(), "removed");
+        let returned = map.insert_into(["nested", "shallow"], "removed");
         assert_eq!(returned, expected);
         assert_eq!(map, reference);
     }
@@ -658,8 +672,8 @@ mod tests {
     #[test]
     #[should_panic]
     fn insert_into_invalid() {
-        let mut map = NestedMap::new();
-        map.insert_into(Vec::<String>::new().iter(), "node");
+        let mut map = NestedMap::<&str, &str>::new();
+        map.insert_into([], "node");
     }
 
     // TODO: Move to docs
