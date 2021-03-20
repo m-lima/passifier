@@ -8,6 +8,18 @@
 mod serde;
 
 /// A nested hash map
+// [ ] entry
+// [ ] get_key_value
+// [ ] insert
+// [ ] retain
+// [ ] into_keys
+// [x] contains_key
+// [x] get
+// [x] get_mut
+// [x] remove
+// [x] remove_entry
+
+// [ ] get_last_path
 #[derive(Clone)]
 pub struct NestedMap<K, V, S = std::collections::hash_map::RandomState>(
     std::collections::HashMap<K, Node<K, V, S>, S>,
@@ -22,24 +34,39 @@ impl<K, V> NestedMap<K, V, std::collections::hash_map::RandomState> {
     }
 }
 
+impl<K, V> NestedMap<K, V, std::collections::hash_map::RandomState>
+where
+    K: Eq + std::hash::Hash,
+{
+    pub fn insert_into<I, N>(&mut self, iter: I, node: N) -> Option<Node<K, V>>
+    where
+        I: DoubleEndedIterator<Item = K>,
+        N: Into<Node<K, V>>,
+    {
+        let mut iter = iter.peekable();
+        let mut root = self;
+
+        let last = loop {
+            let key = iter.next().expect("cannot insert into an empty path");
+            if iter.peek().is_some() && root.get(&key).and_then(Node::as_branch).is_some() {
+                root = root
+                    .get_mut(&key)
+                    .and_then(Node::as_branch_mut)
+                    .expect("impossibly missing");
+            } else {
+                break key;
+            }
+        };
+
+        root.insert(last, Node::from_path(iter, node))
+    }
+}
+
 impl<K, V, S> NestedMap<K, V, S>
 where
     K: Eq + std::hash::Hash,
     S: std::hash::BuildHasher,
 {
-    // [ ] entry
-    // [ ] get_key_value
-    // [ ] insert
-    // [ ] retain
-    // [ ] into_keys
-    // [x] contains_key
-    // [x] get
-    // [x] get_mut
-    // [x] remove
-    // [x] remove_entry
-
-    // [ ] get_last_path
-
     #[inline]
     pub fn contains_path<'a, P, Q: ?Sized>(&self, path: P) -> bool
     where
@@ -129,7 +156,7 @@ where
             if peekable.peek().is_none() {
                 break key;
             }
-            if let Node::Branch(branch) = root.get_mut(key)? {
+            if let Node::Branch(ref mut branch) = *root.get_mut(key)? {
                 root = branch;
             } else {
                 return None;
@@ -165,7 +192,7 @@ where
             if peekable.peek().is_none() {
                 break key;
             }
-            if let Node::Branch(branch) = root.get_mut(key)? {
+            if let Node::Branch(ref mut branch) = *root.get_mut(key)? {
                 root = branch;
             } else {
                 return None;
@@ -258,7 +285,7 @@ where
         K: std::borrow::Borrow<Q>,
         Q: Eq + std::hash::Hash,
     {
-        if let Self::Branch(branch) = self {
+        if let Self::Branch(ref branch) = *self {
             branch.get(key)
         } else {
             None
@@ -271,8 +298,44 @@ where
         K: std::borrow::Borrow<Q>,
         Q: Eq + std::hash::Hash,
     {
-        if let Self::Branch(branch) = self {
+        if let Self::Branch(ref mut branch) = *self {
             branch.get_mut(key)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn as_leaf(&self) -> Option<&V> {
+        if let Self::Leaf(ref leaf) = *self {
+            Some(leaf)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn as_branch(&self) -> Option<&NestedMap<K, V, S>> {
+        if let Self::Branch(ref branch) = *self {
+            Some(branch)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn as_leaf_mut(&mut self) -> Option<&mut V> {
+        if let Self::Leaf(ref mut leaf) = *self {
+            Some(leaf)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn as_branch_mut(&mut self) -> Option<&mut NestedMap<K, V, S>> {
+        if let Self::Branch(ref mut branch) = *self {
+            Some(branch)
         } else {
             None
         }
@@ -284,7 +347,7 @@ where
     K: Eq + std::hash::Hash,
 {
     #[inline]
-    pub fn from_path<I, N>(iter: I, node: N) -> Self
+    fn from_path<I, N>(iter: I, node: N) -> Self
     where
         I: DoubleEndedIterator<Item = K>,
         N: Into<Node<K, V>>,
@@ -292,7 +355,7 @@ where
         Self::from_path_rev(iter.rev(), node)
     }
 
-    pub fn from_path_rev<I, N>(iter: I, node: N) -> Self
+    fn from_path_rev<I, N>(iter: I, node: N) -> Self
     where
         I: Iterator<Item = K>,
         N: Into<Node<K, V>>,
@@ -326,14 +389,14 @@ where
     fn eq(&self, other: &Node<K, V, S>) -> bool {
         match *self {
             Self::Leaf(ref leaf) => {
-                if let Self::Leaf(other_leaf) = other {
+                if let Self::Leaf(ref other_leaf) = *other {
                     leaf.eq(other_leaf)
                 } else {
                     false
                 }
             }
             Self::Branch(ref branch) => {
-                if let Self::Branch(other_branch) = other {
+                if let Self::Branch(ref other_branch) = *other {
                     branch.eq(other_branch)
                 } else {
                     false
@@ -374,7 +437,7 @@ where
 
     #[inline]
     fn index(&self, key: &Q) -> &Self::Output {
-        if let Self::Branch(branch) = self {
+        if let Self::Branch(ref branch) = *self {
             &branch[key]
         } else {
             panic!("no entry found for key")
@@ -534,6 +597,69 @@ mod tests {
             map.remove_entry_from(["key"]),
             Some((own!("key"), Leaf("value")))
         );
+    }
+
+    #[test]
+    fn insert_into() {
+        let mut map = NestedMap::new();
+        let mut reference = NestedMap::new();
+
+        let expected = reference.insert("key", "value".into());
+        let returned = map.insert_into(vec!["key"].into_iter(), "value");
+        assert_eq!(returned, expected);
+        assert_eq!(map, reference);
+
+        let expected = reference.insert("key", "new".into());
+        let returned = map.insert_into(vec!["key"].into_iter(), "new");
+        assert_eq!(returned, expected);
+        assert_eq!(map, reference);
+
+        let expected = {
+            let mut inner = NestedMap::new();
+            inner.insert("inner_key", "inner_value".into());
+            reference.insert("nested", inner.clone().into())
+        };
+        let returned = map.insert_into(vec!["nested", "inner_key"].into_iter(), "inner_value");
+        assert_eq!(returned, expected);
+        assert_eq!(map, reference);
+
+        let expected = {
+            let mut deep = NestedMap::new();
+            deep.insert("key", "value".into());
+            let mut mid = NestedMap::new();
+            mid.insert("deep", deep.into());
+            let mut shallow = NestedMap::new();
+            shallow.insert("mid", mid.into());
+            if let Some(Node::Branch(inner)) = reference.get_mut("nested") {
+                inner.insert("shallow", shallow.into())
+            } else {
+                unreachable!();
+            }
+        };
+        let returned = map.insert_into(
+            vec!["nested", "shallow", "mid", "deep", "key"].into_iter(),
+            "value",
+        );
+        assert_eq!(returned, expected);
+        assert_eq!(map, reference);
+
+        let expected = {
+            if let Some(Node::Branch(inner)) = reference.get_mut("nested") {
+                inner.insert("shallow", "removed".into())
+            } else {
+                unreachable!();
+            }
+        };
+        let returned = map.insert_into(vec!["nested", "shallow"].into_iter(), "removed");
+        assert_eq!(returned, expected);
+        assert_eq!(map, reference);
+    }
+
+    #[test]
+    #[should_panic]
+    fn insert_into_invalid() {
+        let mut map = NestedMap::new();
+        map.insert_into(Vec::<String>::new().iter(), "node");
     }
 
     // TODO: Move to docs
