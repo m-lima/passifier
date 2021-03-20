@@ -437,7 +437,6 @@ dependencies = [
  "rucline",
  "serde",
  "serde_json",
- "store",
 ]
 
 [[package]]
@@ -677,15 +676,6 @@ dependencies = [
  "cfg-if",
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "store"
-version = "0.1.0"
-dependencies = [
- "crypter",
- "serde",
- "thiserror",
 ]
 
 [[package]]

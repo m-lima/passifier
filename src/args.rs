@@ -19,16 +19,26 @@ pub enum Action {
     Print(Print),
 
     /// Create new secret
-    Create(Entry),
+    Create(Write),
 
     /// Read an existing secret
-    Read(Path),
+    Read(Read),
 
     /// Update an existing secret
-    Update(Entry),
+    Update(Write),
 
     /// Delete an existing secret
-    Delete(Path),
+    Delete(Delete),
+}
+
+#[derive(clap::Clap, Debug)]
+pub struct Read {
+    /// Path to the secret
+    pub path: Path,
+
+    /// Pretty print
+    #[clap(short, long)]
+    pub pretty: bool,
 }
 
 #[derive(clap::Clap, Debug)]
@@ -39,46 +49,40 @@ pub struct Print {
 }
 
 #[derive(clap::Clap, Debug)]
-pub struct Path {
+pub struct Delete {
     /// Path to the secret
-    pub path: Entries,
-}
-
-impl Path {
-    pub fn iter(&self) -> impl Iterator<Item = &String> {
-        self.path.0.iter()
-    }
+    pub path: Path,
 }
 
 #[derive(clap::Clap, Debug)]
-pub struct Entry {
+pub struct Write {
     /// Path to the secret
-    pub path: Entries,
+    pub path: Path,
 
     /// Value for the secret
     #[clap( parse(try_from_str = parse_entry))]
-    pub secret: store::Entry,
-}
-
-impl Entry {
-    pub fn iter(&self) -> impl Iterator<Item = &String> {
-        self.path.0.iter()
-    }
+    pub(super) secret: super::Node,
 }
 
 #[derive(Debug)]
-pub struct Entries(Vec<String>);
+pub struct Path(pub Vec<String>);
 
-fn parse_entry(string: &str) -> anyhow::Result<store::Entry> {
-    fn remove_empties(entry: &mut store::Entry) -> bool {
-        if let store::Entry::Nested(nested) = entry {
-            let secrets = nested.secrets().map(String::from).collect::<Vec<_>>();
+impl Path {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &String> {
+        self.0.iter()
+    }
+}
+
+fn parse_entry(string: &str) -> anyhow::Result<super::Node> {
+    fn remove_empties(node: &mut super::Node) -> bool {
+        if let nested_map::Node::Branch(branch) = node {
+            let secrets = branch.keys().map(String::from).collect::<Vec<_>>();
             for secret in secrets {
-                if remove_empties(nested.get(&secret).unwrap()) {
-                    nested.delete(&secret).unwrap();
+                if remove_empties(branch.get_mut(&secret).unwrap()) {
+                    branch.remove(&secret).unwrap();
                 }
             }
-            nested.secrets().next().is_none()
+            branch.keys().next().is_none()
         } else {
             false
         }
@@ -94,11 +98,13 @@ fn parse_entry(string: &str) -> anyhow::Result<store::Entry> {
         remove_empties(&mut entry);
         Ok(entry)
     } else {
-        Ok(store::Entry::String(String::from(string)))
+        Ok(super::Node::Leaf(super::Entry::String(String::from(
+            string,
+        ))))
     }
 }
 
-impl std::str::FromStr for Entries {
+impl std::str::FromStr for Path {
     type Err = anyhow::Error;
 
     fn from_str(string: &str) -> Result<Self, Self::Err> {
@@ -146,36 +152,45 @@ impl std::str::FromStr for Source {
 
 #[cfg(test)]
 mod tests {
+    use super::super::{Entry, Node, Store};
+
     #[test]
     fn parse_entry() {
         assert_eq!(
             super::parse_entry("foobar").unwrap(),
-            store::Entry::String(String::from("foobar"))
+            Node::Leaf(Entry::String(String::from("foobar")))
         );
 
         assert_eq!(
             super::parse_entry("\"foobar\"").unwrap(),
-            store::Entry::String(String::from("foobar"))
+            Node::Leaf(Entry::String(String::from("foobar")))
         );
 
         assert_eq!(
             super::parse_entry(" \n\t\r \"foobar\"").unwrap(),
-            store::Entry::String(String::from("foobar"))
+            Node::Leaf(Entry::String(String::from("foobar")))
         );
 
         assert_eq!(
             super::parse_entry("[1, 2]").unwrap(),
-            store::Entry::Binary(vec![1, 2])
+            Node::Leaf(Entry::Binary(vec![1, 2]))
         );
 
         assert_eq!(
             super::parse_entry("\n{\n}").unwrap(),
-            store::Entry::Nested(store::Store::new())
+            Node::Branch(Store::new())
         );
 
         assert_eq!(
             super::parse_entry(r#"{"nested":{"inner":{}}}"#).unwrap(),
-            store::Entry::Nested(store::Store::new())
+            Node::Branch(Store::new())
+        );
+
+        let mut store = Store::new();
+        store.insert_into(["nested", "inner", "key"], Entry::from("value"));
+        assert_eq!(
+            super::parse_entry(r#"{"nested":{"inner":{"key":"value", "empty":{}}}}"#).unwrap(),
+            Node::Branch(store)
         );
     }
 }

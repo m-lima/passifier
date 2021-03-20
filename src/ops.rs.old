@@ -1,79 +1,129 @@
-use super::{args, Node, Store};
-
-pub(super) fn create(store: &mut Store, write: args::Write) -> anyhow::Result<()> {
-    let args::Write { path, secret } = write;
-    if should_delete(&secret) {
-        anyhow::bail!("Empty secret");
-    } else if store.contains_path_iter(path.iter()) {
-        anyhow::bail!("Conflict");
-    } else {
-        store.insert_into_iter(path.iter(), secret);
-    }
-
-    Ok(())
+trait PathValidator {
+    fn valid(&self) -> anyhow::Result<&Self>;
 }
 
-pub(super) fn read(store: &Store, read: args::Read) -> anyhow::Result<()> {
-    let args::Read { path, pretty } = read;
-    store
-        .get_from_iter(path.iter())
-        .ok_or_else(|| anyhow::anyhow!("Not found"))
-        .and_then(|node| print_node(node, pretty))
-}
-
-pub(super) fn update(store: &mut Store, write: args::Write) -> anyhow::Result<()> {
-    let args::Write { path, secret } = write;
-    if should_delete(&secret) {
-        delete_path(store, &path)?;
-    } else {
-        store.insert_into_iter(path.iter(), secret);
-    }
-
-    Ok(())
-}
-
-pub(super) fn delete(store: &mut Store, delete: args::Delete) -> anyhow::Result<()> {
-    let args::Delete { path } = delete;
-    delete_path(store, &path)
-}
-
-pub(super) fn print(store: Store, print: &args::Print) -> anyhow::Result<()> {
-    print_node(&Node::Branch(store), print.pretty)
-}
-
-pub(super) fn delete_path(store: &mut Store, path: &args::Path) -> anyhow::Result<()> {
-    store
-        .remove_from_iter(path.iter())
-        .ok_or_else(|| anyhow::anyhow!("Not found"))?;
-
-    Ok(())
-}
-
-fn print_node(node: &Node, pretty: bool) -> anyhow::Result<()> {
-    let json = if pretty {
-        serde_json::to_string_pretty(&node)?
-    } else {
-        serde_json::to_string(&node)?
-    };
-
-    println!("{}", json);
-    Ok(())
-}
-
-fn should_delete(secret: &Node) -> bool {
-    if let Node::Branch(ref branch) = *secret {
-        if branch.is_empty() {
-            return true;
+impl PathValidator for &[String] {
+    fn valid(&self) -> anyhow::Result<&Self> {
+        if self.is_empty() {
+            Err(anyhow::anyhow!("Path is empty"))
+        } else {
+            Ok(self)
         }
     }
-    false
+}
+
+pub fn create(root: &mut store::Store, path: &[String], entry: store::Entry) -> anyhow::Result<()> {
+    fn to_entry(path: &[String], entry: store::Entry) -> store::Entry {
+        if path.is_empty() {
+            return entry;
+        }
+
+        path.iter().rev().fold(entry, |acc, curr| {
+            let mut store = store::Store::new();
+            store.create(String::from(curr), acc).unwrap();
+            store::Entry::Nested(store)
+        })
+    }
+
+    fn create_inner<'r, 'p>(
+        root: &'r mut store::Store,
+        path: &'p [String],
+    ) -> (&'r mut store::Store, &'p [String]) {
+        if path.len() == 1 {
+            return (root, path);
+        }
+
+        if let Some(store::Entry::Nested(_)) = root.read(&path[0]) {
+            if let Some(store::Entry::Nested(inner)) = root.get(&path[0]) {
+                return create_inner(inner, &path[1..]);
+            } else {
+                unreachable!();
+            }
+        }
+
+        (root, path)
+    }
+
+    if let store::Entry::Nested(ref store) = entry {
+        if store.secrets().next().is_none() {
+            anyhow::bail!("Nothing to add");
+        }
+    }
+
+    let (root, rest) = create_inner(root, path.valid()?);
+    let entry = to_entry(&rest[1..], entry);
+    root.create(rest[0].to_owned(), entry)?;
+    Ok(())
+}
+
+pub fn read<'a>(root: &'a store::Store, path: &[String]) -> anyhow::Result<&'a store::Entry> {
+    fn read_inner<'a>(root: &'a store::Store, path: &[String]) -> Option<&'a store::Entry> {
+        root.read(&path[0]).and_then(|entry| {
+            if path.len() == 1 {
+                Some(entry)
+            } else if let store::Entry::Nested(inner) = entry {
+                read_inner(inner, &path[1..])
+            } else {
+                None
+            }
+        })
+    }
+
+    read_inner(root, path.valid()?).ok_or_else(|| anyhow::anyhow!("Not found"))
+}
+
+pub fn update(root: &mut store::Store, path: &[String], entry: store::Entry) -> anyhow::Result<()> {
+    fn update_inner<'r, 'p>(
+        root: &'r mut store::Store,
+        path: &'p [String],
+    ) -> anyhow::Result<(&'r mut store::Store, &'p String)> {
+        if path.len() == 1 {
+            Ok((root, &path[0]))
+        } else if let Some(store::Entry::Nested(_)) = root.read(&path[0]) {
+            if let Some(store::Entry::Nested(inner)) = root.get(&path[0]) {
+                update_inner(inner, &path[1..])
+            } else {
+                unreachable!();
+            }
+        } else {
+            Err(anyhow::anyhow!("Not found"))
+        }
+    }
+
+    if let store::Entry::Nested(ref inner) = entry {
+        if inner.secrets().next().is_none() {
+            return delete(root, path);
+        }
+    }
+
+    let (root, path) = update_inner(root, path.valid()?)?;
+    root.update(path.clone(), entry)?;
+    Ok(())
+}
+
+pub fn delete(root: &mut store::Store, path: &[String]) -> anyhow::Result<()> {
+    fn delete_inner(root: &mut store::Store, path: &[String]) -> anyhow::Result<bool> {
+        fn delete_nested(root: &mut store::Store, path: &[String]) -> anyhow::Result<bool> {
+            match root.get(&path[0]) {
+                Some(store::Entry::Nested(inner)) => delete_inner(inner, &path[1..]),
+                Some(_) => anyhow::bail!("Invalid path"),
+                None => anyhow::bail!("Not found"),
+            }
+        }
+
+        if path.len() == 1 || delete_nested(root, path)? {
+            root.delete(&path[0])?;
+            Ok(root.secrets().next().is_none())
+        } else {
+            Ok(false)
+        }
+    }
+
+    delete_inner(root, path.valid()?).map(|_| ())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::Entry;
-    use super::{args, Node, Store};
-
     static MAP: &str = r#"{
                             "binary": [ 245, 107, 95, 100 ],
                             "nested": {
@@ -92,28 +142,24 @@ mod tests {
             String::from($string)
         };
         (e $string:literal) => {
-            Node::Leaf(Entry::String(String::from($string)))
+            store::Entry::String(String::from($string))
         };
     }
 
     macro_rules! path {
         ($($string:literal),*) => {
-            &args::Path(vec![$(own!($string)),*])
-        };
-    }
-
-    macro_rules! read {
-        ($($string:literal),*) => {
-            args::Read{ path: args::Path::new(vec![$(own!($string)),*]), pretty: false }
+            &[$(own!($string)),*]
         };
     }
 
     macro_rules! parse {
         ($string:expr) => {
-            serde_json::from_str::<Store>($string).unwrap().into()
+            serde_json::from_str::<store::Store>($string)
+                .unwrap()
+                .into()
         };
         (e $string:literal) => {
-            Node::Branch(parse!($string))
+            store::Entry::Nested(parse!($string))
         };
     }
 
@@ -135,7 +181,7 @@ mod tests {
         }};
     }
 
-    fn make_store() -> Store {
+    fn make_store() -> store::Store {
         parse!(MAP)
     }
 
@@ -202,42 +248,42 @@ mod tests {
         let store = make_store();
 
         assert_eq!(
-            read(&store, read!["binary"]).unwrap(),
-            &Entry::Binary(vec![245, 107, 95, 100])
-        );
-
-        assert_eq!(
-            read(&store, read!["nested"]).unwrap(),
-            store.read("nested").unwrap()
-        );
-
-        assert_eq!(
-            read(&store, read!["nested", "inner"]).unwrap(),
-            &parse!(e r#"{"deep":{"foo":"bar"}}"#)
-        );
-
-        assert_eq!(
-            read(&store, read!["nested", "inner", "deep"]).unwrap(),
-            &parse!(e r#"{"foo":"bar"}"#)
-        );
-
-        assert_eq!(
-            read(&store, read!["nested", "inner", "deep", "foo"]).unwrap(),
-            &own!(e "bar")
-        );
-
-        assert_eq!(
-            read(&store, read!["nested", "sibling"]).unwrap(),
-            &own!(e "inner_sibling")
-        );
-
-        assert_eq!(
-            read(&store, read!["binary"]).unwrap(),
+            read(&store, path!["binary"]).unwrap(),
             &store::Entry::Binary(vec![245, 107, 95, 100])
         );
 
         assert_eq!(
-            read(&store, read!["sibling"]).unwrap(),
+            read(&store, path!["nested"]).unwrap(),
+            store.read("nested").unwrap()
+        );
+
+        assert_eq!(
+            read(&store, path!["nested", "inner"]).unwrap(),
+            &parse!(e r#"{"deep":{"foo":"bar"}}"#)
+        );
+
+        assert_eq!(
+            read(&store, path!["nested", "inner", "deep"]).unwrap(),
+            &parse!(e r#"{"foo":"bar"}"#)
+        );
+
+        assert_eq!(
+            read(&store, path!["nested", "inner", "deep", "foo"]).unwrap(),
+            &own!(e "bar")
+        );
+
+        assert_eq!(
+            read(&store, path!["nested", "sibling"]).unwrap(),
+            &own!(e "inner_sibling")
+        );
+
+        assert_eq!(
+            read(&store, path!["binary"]).unwrap(),
+            &store::Entry::Binary(vec![245, 107, 95, 100])
+        );
+
+        assert_eq!(
+            read(&store, path!["sibling"]).unwrap(),
             &own!(e "outer_sibling")
         );
     }
@@ -248,15 +294,15 @@ mod tests {
 
         let store = make_store();
 
-        assert!(read(&store, read!["bla"]).is_err());
-        assert!(read(&store, read!["binary", "245"]).is_err());
-        assert!(read(&store, read!["nested", "bla"]).is_err());
-        assert!(read(&store, read!["nested", "bla", "foo"]).is_err());
-        assert!(read(&store, read!["nested", "inner", "bla"]).is_err());
-        assert!(read(&store, read!["nested", "inner", "bla", "deep"]).is_err());
-        assert!(read(&store, read!["nested", "inner", "deep", "bla"]).is_err());
-        assert!(read(&store, read!["nested", "inner", "deep", "foo", "bla"]).is_err());
-        assert!(read(&store, read![""]).is_err());
+        assert!(read(&store, path!["bla"]).is_err());
+        assert!(read(&store, path!["binary", "245"]).is_err());
+        assert!(read(&store, path!["nested", "bla"]).is_err());
+        assert!(read(&store, path!["nested", "bla", "foo"]).is_err());
+        assert!(read(&store, path!["nested", "inner", "bla"]).is_err());
+        assert!(read(&store, path!["nested", "inner", "bla", "deep"]).is_err());
+        assert!(read(&store, path!["nested", "inner", "deep", "bla"]).is_err());
+        assert!(read(&store, path!["nested", "inner", "deep", "foo", "bla"]).is_err());
+        assert!(read(&store, path![""]).is_err());
     }
 
     #[test]
