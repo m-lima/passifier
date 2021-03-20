@@ -55,7 +55,7 @@ fn main() -> anyhow::Result<()> {
 
     match arguments.action {
         args::Action::Create(write) => ops::create(&mut store, write)?,
-        args::Action::Read(read) => ops::read(&store, read)?,
+        args::Action::Read(read) => ops::read(&store, read).map(|_| ())?,
         args::Action::Update(write) => ops::update(&mut store, write)?,
         args::Action::Delete(delete) => ops::delete(&mut store, delete)?,
         args::Action::Print(print) => return ops::print(store, &print),

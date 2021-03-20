@@ -13,17 +13,22 @@ pub(super) fn create(store: &mut Store, write: args::Write) -> anyhow::Result<()
     Ok(())
 }
 
-pub(super) fn read(store: &Store, read: args::Read) -> anyhow::Result<()> {
+pub(super) fn read(store: &Store, read: args::Read) -> anyhow::Result<&Node> {
     let args::Read { path, pretty } = read;
     store
         .get_from_iter(path.iter())
         .ok_or_else(|| anyhow::anyhow!("Not found"))
-        .and_then(|node| print_node(node, pretty))
+        .and_then(|node| {
+            print_node(node, pretty)?;
+            Ok(node)
+        })
 }
 
 pub(super) fn update(store: &mut Store, write: args::Write) -> anyhow::Result<()> {
     let args::Write { path, secret } = write;
-    if should_delete(&secret) {
+    if !store.contains_path_iter(path.iter()) {
+        anyhow::bail!("Not found");
+    } else if should_delete(&secret) {
         delete_path(store, &path)?;
     } else {
         store.insert_into_iter(path.iter(), secret);
@@ -87,24 +92,9 @@ mod tests {
                             "sibling": "outer_sibling"
                           }"#;
 
-    macro_rules! own {
-        ($string:literal) => {
-            String::from($string)
-        };
-        (e $string:literal) => {
-            Node::Leaf(Entry::String(String::from($string)))
-        };
-    }
-
     macro_rules! path {
         ($($string:literal),*) => {
-            &args::Path(vec![$(own!($string)),*])
-        };
-    }
-
-    macro_rules! read {
-        ($($string:literal),*) => {
-            args::Read{ path: args::Path::new(vec![$(own!($string)),*]), pretty: false }
+            args::Path(vec![$(String::from($string)),*])
         };
     }
 
@@ -112,27 +102,81 @@ mod tests {
         ($string:expr) => {
             serde_json::from_str::<Store>($string).unwrap().into()
         };
-        (e $string:literal) => {
+    }
+
+    macro_rules! leaf {
+        ($string:literal) => {
+            Node::Leaf(Entry::String(String::from($string)))
+        };
+
+        ($($binary:literal),*) => {
+            Node::Leaf(Entry::Binary(vec![$($binary),*]))
+        };
+    }
+
+    macro_rules! branch {
+        ($string:literal) => {
             Node::Branch(parse!($string))
         };
     }
 
+    macro_rules! create {
+        ([$path:literal], $value:literal) => {
+            args::Write { path: path!($path), secret: leaf!($value) }
+        };
+
+        ([$($path:literal),*], $value:literal) => {
+            args::Write { path: path!($($path),*), secret: leaf!($value) }
+        };
+
+        ([$path:literal]) => {
+            args::Write { path: path!($path), secret: branch!("{}") }
+        };
+    }
+
+    macro_rules! read {
+        ($($path:literal),*) => {
+            args::Read{ path: path!($($path),*), pretty: false }
+        };
+    }
+
+    macro_rules! update {
+        ([$($path:literal),*]) => {
+            args::Write { path: path!($($path),*), secret: branch!("{}") }
+        };
+
+        ([$path:literal], $value:literal) => {
+            args::Write { path: path!($path), secret: leaf!($value) }
+        };
+
+        ([$($path:literal),*], $value:literal) => {
+            args::Write { path: path!($($path),*), secret: leaf!($value) }
+        };
+    }
+
+    macro_rules! delete {
+        ($($path:literal),*) => {
+            args::Delete{ path: path!($($path),*) }
+        };
+    }
+
     macro_rules! update_empty {
-        ($path:expr) => {{
+        ($($path:literal),*) => {{
             let mut updated = make_store();
             let mut deleted = make_store();
-            super::update(&mut updated, $path, parse!(e "{}")).unwrap();
-            super::delete(&mut deleted, $path).unwrap();
+            super::update(&mut updated, update!([$($path),*])).unwrap();
+            super::delete(&mut deleted, delete!($($path),*)).unwrap();
             assert_eq!(updated, deleted);
         }};
     }
 
-    macro_rules! delete {
-        ($path:expr, $expected:literal) => {{
+    macro_rules! test_delete {
+        ([$($path:literal),*], $expected:literal) => {{
             let mut store = make_store();
-            super::delete(&mut store, $path).unwrap();
+            super::delete(&mut store, delete!($($path),*)).unwrap();
             assert_eq!(store, parse!($expected));
         }};
+
     }
 
     fn make_store() -> Store {
@@ -143,15 +187,15 @@ mod tests {
     fn create() {
         use super::create;
 
-        let mut store = store::Store::new();
+        let mut store = Store::new();
 
-        create(&mut store, path!["new"], own!(e "new_value")).unwrap();
+        create(&mut store, create!(["new"], "new value")).unwrap();
         assert_eq!(store, parse!(r#"{"new":"new_value"}"#));
 
-        create(&mut store, path!["foo"], own!(e "new_value")).unwrap();
+        create(&mut store, create!(["foo"], "new_value")).unwrap();
         assert_eq!(store, parse!(r#"{"new":"new_value","foo":"new_value"}"#));
 
-        create(&mut store, path!["nested", "inner", "foo"], own!(e "bar")).unwrap();
+        create(&mut store, create!(["nested", "inner", "foo"], "bar")).unwrap();
         assert_eq!(
             store,
             parse!(r#"{"new":"new_value","foo":"new_value","nested":{"inner":{"foo":"bar"}}}"#)
@@ -159,8 +203,7 @@ mod tests {
 
         create(
             &mut store,
-            path!["nested", "other", "foo", "deep", "deeper"],
-            own!(e "here"),
+            create!(["nested", "other", "foo", "deep", "deeper"], "here"),
         )
         .unwrap();
         assert_eq!(
@@ -177,13 +220,12 @@ mod tests {
 
         let mut store = make_store();
 
-        assert!(create(&mut store, path!["binary"], own!(e "new_value")).is_err());
-        assert!(create(&mut store, path!["nested"], own!(e "new_value")).is_err());
-        assert!(create(&mut store, path!["nested", "sibling"], own!(e "new_value")).is_err());
+        assert!(create(&mut store, create!(["binary"], "new_value")).is_err());
+        assert!(create(&mut store, create!(["nested"], "new_value")).is_err());
+        assert!(create(&mut store, create!(["nested", "sibling"], "new_value")).is_err());
         assert!(create(
             &mut store,
-            path!["nested", "sibling", "deep"],
-            own!(e "new_value")
+            create!(["nested", "sibling", "deep"], "new_value")
         )
         .is_err());
     }
@@ -192,7 +234,7 @@ mod tests {
     fn create_empty() {
         use super::create;
         let mut store = make_store();
-        assert!(create(&mut store, path!["nested"], parse!(e "{}")).is_err());
+        assert!(create(&mut store, create!(["nested"])).is_err());
     }
 
     #[test]
@@ -203,42 +245,42 @@ mod tests {
 
         assert_eq!(
             read(&store, read!["binary"]).unwrap(),
-            &Entry::Binary(vec![245, 107, 95, 100])
+            &leaf![245, 107, 95, 100]
         );
 
         assert_eq!(
             read(&store, read!["nested"]).unwrap(),
-            store.read("nested").unwrap()
+            store.get("nested").unwrap()
         );
 
         assert_eq!(
             read(&store, read!["nested", "inner"]).unwrap(),
-            &parse!(e r#"{"deep":{"foo":"bar"}}"#)
+            &branch!(r#"{"deep":{"foo":"bar"}}"#)
         );
 
         assert_eq!(
             read(&store, read!["nested", "inner", "deep"]).unwrap(),
-            &parse!(e r#"{"foo":"bar"}"#)
+            &branch!(r#"{"foo":"bar"}"#)
         );
 
         assert_eq!(
             read(&store, read!["nested", "inner", "deep", "foo"]).unwrap(),
-            &own!(e "bar")
+            &leaf!("bar")
         );
 
         assert_eq!(
             read(&store, read!["nested", "sibling"]).unwrap(),
-            &own!(e "inner_sibling")
+            &leaf!("inner_sibling")
         );
 
         assert_eq!(
             read(&store, read!["binary"]).unwrap(),
-            &store::Entry::Binary(vec![245, 107, 95, 100])
+            &leaf![245, 107, 95, 100]
         );
 
         assert_eq!(
             read(&store, read!["sibling"]).unwrap(),
-            &own!(e "outer_sibling")
+            &leaf!("outer_sibling")
         );
     }
 
@@ -266,7 +308,7 @@ mod tests {
         let mut store = make_store();
 
         // update top level
-        update(&mut store, path!["binary"], own!(e "new")).unwrap();
+        update(&mut store, update!(["binary"], "new")).unwrap();
         assert_eq!(
             store,
             parse!(
@@ -288,8 +330,7 @@ mod tests {
         // update deep
         update(
             &mut store,
-            path!["nested", "inner", "deep", "foo"],
-            own!(e "new"),
+            update!(["nested", "inner", "deep", "foo"], "new"),
         )
         .unwrap();
         assert_eq!(
@@ -311,7 +352,7 @@ mod tests {
         );
 
         // update root of deep tree
-        update(&mut store, path!["nested"], own!(e "new")).unwrap();
+        update(&mut store, update!(["nested"], "new")).unwrap();
         assert_eq!(
             store,
             parse!(
@@ -326,13 +367,13 @@ mod tests {
 
     #[test]
     fn update_empty_just_deletes() {
-        update_empty!(path!["binary"]);
-        update_empty!(path!["sibling"]);
-        update_empty!(path!["nested"]);
-        update_empty!(path!["nested", "sibling"]);
-        update_empty!(path!["nested", "inner"]);
-        update_empty!(path!["nested", "inner", "deep"]);
-        update_empty!(path!["nested", "inner", "deep", "foo"]);
+        update_empty!["binary"];
+        update_empty!["sibling"];
+        update_empty!["nested"];
+        update_empty!["nested", "sibling"];
+        update_empty!["nested", "inner"];
+        update_empty!["nested", "inner", "deep"];
+        update_empty!["nested", "inner", "deep", "foo"];
     }
 
     #[test]
@@ -341,36 +382,25 @@ mod tests {
 
         let mut store = make_store();
 
-        assert!(update(&mut store, path!["bla"], own!(e "")).is_err());
-        assert!(update(&mut store, path!["binary", "245"], own!(e "")).is_err());
-        assert!(update(&mut store, path!["nested", "bla"], own!(e "")).is_err());
-        assert!(update(&mut store, path!["nested", "bla", "foo"], own!(e "")).is_err());
-        assert!(update(&mut store, path!["nested", "inner", "bla"], own!(e "")).is_err());
+        assert!(update(&mut store, update!(["bla"], "")).is_err());
+        assert!(update(&mut store, update!(["binary", "245"], "")).is_err());
+        assert!(update(&mut store, update!(["nested", "bla"], "")).is_err());
+        assert!(update(&mut store, update!(["nested", "bla", "foo"], "")).is_err());
+        assert!(update(&mut store, update!(["nested", "inner", "bla"], "")).is_err());
+        assert!(update(&mut store, update!(["nested", "inner", "bla", "deep"], "")).is_err());
+        assert!(update(&mut store, update!(["nested", "inner", "deep", "bla"], "")).is_err());
         assert!(update(
             &mut store,
-            path!["nested", "inner", "bla", "deep"],
-            own!(e "")
+            update!(["nested", "inner", "deep", "foo", "bla"], "")
         )
         .is_err());
-        assert!(update(
-            &mut store,
-            path!["nested", "inner", "deep", "bla"],
-            own!(e "")
-        )
-        .is_err());
-        assert!(update(
-            &mut store,
-            path!["nested", "inner", "deep", "foo", "bla"],
-            own!(e "")
-        )
-        .is_err());
-        assert!(update(&mut store, path![""], own!(e "")).is_err());
+        assert!(update(&mut store, update!([""], "")).is_err());
     }
 
     #[test]
     fn delete() {
-        delete!(
-            path!["binary"],
+        test_delete!(
+            ["binary"],
             r#"{
                  "nested": {
                    "inner": {
@@ -384,8 +414,8 @@ mod tests {
                }"#
         );
 
-        delete!(
-            path!["sibling"],
+        test_delete!(
+            ["sibling"],
             r#"{
                  "binary": [ 245, 107, 95, 100 ],
                  "nested": {
@@ -399,16 +429,16 @@ mod tests {
                }"#
         );
 
-        delete!(
-            path!["nested"],
+        test_delete!(
+            ["nested"],
             r#"{
                  "binary": [ 245, 107, 95, 100 ],
                  "sibling": "outer_sibling"
                }"#
         );
 
-        delete!(
-            path!["nested", "sibling"],
+        test_delete!(
+            ["nested", "sibling"],
             r#"{
                  "binary": [ 245, 107, 95, 100 ],
                  "nested": {
@@ -422,8 +452,8 @@ mod tests {
                }"#
         );
 
-        delete!(
-            path!["nested", "inner"],
+        test_delete!(
+            ["nested", "inner"],
             r#"{
                  "binary": [ 245, 107, 95, 100 ],
                  "nested": {
@@ -433,8 +463,8 @@ mod tests {
                }"#
         );
 
-        delete!(
-            path!["nested", "inner", "deep"],
+        test_delete!(
+            ["nested", "inner", "deep"],
             r#"{
                  "binary": [ 245, 107, 95, 100 ],
                  "nested": {
@@ -444,8 +474,8 @@ mod tests {
                }"#
         );
 
-        delete!(
-            path!["nested", "inner", "deep", "foo"],
+        test_delete!(
+            ["nested", "inner", "deep", "foo"],
             r#"{
                  "binary": [ 245, 107, 95, 100 ],
                  "nested": {
@@ -462,14 +492,14 @@ mod tests {
 
         let mut store = make_store();
 
-        assert!(delete(&mut store, path!["bla"]).is_err());
-        assert!(delete(&mut store, path!["binary", "245"]).is_err());
-        assert!(delete(&mut store, path!["nested", "bla"]).is_err());
-        assert!(delete(&mut store, path!["nested", "bla", "foo"]).is_err());
-        assert!(delete(&mut store, path!["nested", "inner", "bla"]).is_err());
-        assert!(delete(&mut store, path!["nested", "inner", "bla", "deep"]).is_err());
-        assert!(delete(&mut store, path!["nested", "inner", "deep", "bla"]).is_err());
-        assert!(delete(&mut store, path!["nested", "inner", "deep", "foo", "bla"]).is_err());
-        assert!(delete(&mut store, path![""]).is_err());
+        assert!(delete(&mut store, delete!["bla"]).is_err());
+        assert!(delete(&mut store, delete!["binary", "245"]).is_err());
+        assert!(delete(&mut store, delete!["nested", "bla"]).is_err());
+        assert!(delete(&mut store, delete!["nested", "bla", "foo"]).is_err());
+        assert!(delete(&mut store, delete!["nested", "inner", "bla"]).is_err());
+        assert!(delete(&mut store, delete!["nested", "inner", "bla", "deep"]).is_err());
+        assert!(delete(&mut store, delete!["nested", "inner", "deep", "bla"]).is_err());
+        assert!(delete(&mut store, delete!["nested", "inner", "deep", "foo", "bla"]).is_err());
+        assert!(delete(&mut store, delete![""]).is_err());
     }
 }
