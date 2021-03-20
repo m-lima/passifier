@@ -31,12 +31,12 @@ where
     // [ ] get_key_value
     // [ ] contains_key
     // [ ] insert
-    // [ ] remove_entry
     // [ ] retain
     // [ ] into_keys
     // [x] get
     // [x] get_mut
     // [x] remove
+    // [x] remove_entry
 
     // [ ] get_last_path
 
@@ -117,6 +117,42 @@ where
             }
         };
         root.remove(last)
+    }
+
+    #[inline]
+    pub fn remove_entry_from<'a, P, Q: ?Sized>(&mut self, path: P) -> Option<(K, Node<K, V, S>)>
+    where
+        K: std::borrow::Borrow<Q>,
+        Q: 'a + Eq + std::hash::Hash,
+        P: AsRef<[&'a Q]>,
+    {
+        self.remove_entry_from_iter(path.as_ref().iter().map(Clone::clone))
+    }
+
+    pub fn remove_entry_from_iter<'a, I, Q: ?Sized>(
+        &mut self,
+        iter: I,
+    ) -> Option<(K, Node<K, V, S>)>
+    where
+        K: std::borrow::Borrow<Q>,
+        Q: 'a + Eq + std::hash::Hash,
+        I: Iterator<Item = &'a Q>,
+    {
+        let mut peekable = iter.peekable();
+        let mut root = self;
+
+        let last = loop {
+            let key = peekable.next()?;
+            if peekable.peek().is_none() {
+                break key;
+            }
+            if let Node::Branch(branch) = root.get_mut(key)? {
+                root = branch;
+            } else {
+                return None;
+            }
+        };
+        root.remove_entry(last)
     }
 }
 
@@ -398,6 +434,38 @@ mod tests {
         assert_eq!(map.remove_from(["nested", "inner_key"]), None);
         assert_eq!(map.remove_from(["nested2"]), Some(Branch(inner.clone())));
         assert_eq!(map.remove_from(["key"]), Some(Leaf("value")));
+    }
+
+    #[test]
+    fn remove_entry_from() {
+        let mut map = NestedMap::new();
+        map.insert(own!("key"), "value".into());
+
+        let mut inner = NestedMap::new();
+        inner.insert(own!("inner_key"), "inner_value".into());
+
+        map.insert(own!("nested"), inner.clone().into());
+        map.insert(own!("nested2"), inner.clone().into());
+
+        assert_eq!(map.remove_entry_from::<&[&String], String>(&[]), None);
+        assert_eq!(map.remove_entry_from(["nested", "fake"]), None);
+        assert_eq!(
+            map.remove_entry_from(["nested", "inner_key", "too_deep"]),
+            None
+        );
+        assert_eq!(
+            map.remove_entry_from(["nested", "inner_key"]),
+            Some((own!("inner_key"), Leaf("inner_value")))
+        );
+        assert_eq!(map.remove_entry_from(["nested", "inner_key"]), None);
+        assert_eq!(
+            map.remove_entry_from(["nested2"]),
+            Some((own!("nested2"), Branch(inner.clone())))
+        );
+        assert_eq!(
+            map.remove_entry_from(["key"]),
+            Some((own!("key"), Leaf("value")))
+        );
     }
 
     // TODO: Move to docs
