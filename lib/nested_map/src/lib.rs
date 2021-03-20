@@ -10,7 +10,7 @@ mod serde;
 /// A nested hash map
 #[derive(Clone)]
 pub struct NestedMap<K, V, S = std::collections::hash_map::RandomState>(
-    std::collections::HashMap<K, Entry<K, V, S>, S>,
+    std::collections::HashMap<K, Node<K, V, S>, S>,
 );
 
 impl<K, V> NestedMap<K, V, std::collections::hash_map::RandomState> {
@@ -41,7 +41,7 @@ where
     // [ ] get_last_path
 
     #[inline]
-    pub fn get_from<'a, P, Q: ?Sized>(&self, path: P) -> Option<&Entry<K, V, S>>
+    pub fn get_from<'a, P, Q: ?Sized>(&self, path: P) -> Option<&Node<K, V, S>>
     where
         K: std::borrow::Borrow<Q>,
         Q: 'a + Eq + std::hash::Hash,
@@ -50,7 +50,7 @@ where
         self.get_from_iter(path.as_ref().iter().map(Clone::clone))
     }
 
-    pub fn get_from_iter<'a, I, Q: ?Sized>(&self, mut iter: I) -> Option<&Entry<K, V, S>>
+    pub fn get_from_iter<'a, I, Q: ?Sized>(&self, mut iter: I) -> Option<&Node<K, V, S>>
     where
         K: std::borrow::Borrow<Q>,
         Q: 'a + Eq + std::hash::Hash,
@@ -64,7 +64,7 @@ where
     }
 
     #[inline]
-    pub fn get_mut_from<'a, P, Q: ?Sized>(&mut self, path: P) -> Option<&mut Entry<K, V, S>>
+    pub fn get_mut_from<'a, P, Q: ?Sized>(&mut self, path: P) -> Option<&mut Node<K, V, S>>
     where
         K: std::borrow::Borrow<Q>,
         Q: 'a + Eq + std::hash::Hash,
@@ -73,10 +73,7 @@ where
         self.get_mut_from_iter(path.as_ref().iter().map(Clone::clone))
     }
 
-    pub fn get_mut_from_iter<'a, I, Q: ?Sized>(
-        &mut self,
-        mut iter: I,
-    ) -> Option<&mut Entry<K, V, S>>
+    pub fn get_mut_from_iter<'a, I, Q: ?Sized>(&mut self, mut iter: I) -> Option<&mut Node<K, V, S>>
     where
         K: std::borrow::Borrow<Q>,
         Q: 'a + Eq + std::hash::Hash,
@@ -90,7 +87,7 @@ where
     }
 
     #[inline]
-    pub fn remove_from<'a, P, Q: ?Sized>(&mut self, path: P) -> Option<Entry<K, V, S>>
+    pub fn remove_from<'a, P, Q: ?Sized>(&mut self, path: P) -> Option<Node<K, V, S>>
     where
         K: std::borrow::Borrow<Q>,
         Q: 'a + Eq + std::hash::Hash,
@@ -99,7 +96,7 @@ where
         self.remove_from_iter(path.as_ref().iter().map(Clone::clone))
     }
 
-    pub fn remove_from_iter<'a, I, Q: ?Sized>(&mut self, iter: I) -> Option<Entry<K, V, S>>
+    pub fn remove_from_iter<'a, I, Q: ?Sized>(&mut self, iter: I) -> Option<Node<K, V, S>>
     where
         K: std::borrow::Borrow<Q>,
         Q: 'a + Eq + std::hash::Hash,
@@ -113,7 +110,7 @@ where
             if peekable.peek().is_none() {
                 break key;
             }
-            if let Entry::Branch(branch) = root.get_mut(key)? {
+            if let Node::Branch(branch) = root.get_mut(key)? {
                 root = branch;
             } else {
                 return None;
@@ -124,7 +121,7 @@ where
 }
 
 impl<K, V, S> std::ops::Deref for NestedMap<K, V, S> {
-    type Target = std::collections::HashMap<K, Entry<K, V, S>, S>;
+    type Target = std::collections::HashMap<K, Node<K, V, S>, S>;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -178,7 +175,7 @@ where
     Q: Eq + std::hash::Hash,
     S: std::hash::BuildHasher,
 {
-    type Output = Entry<K, V, S>;
+    type Output = Node<K, V, S>;
 
     #[inline]
     fn index(&self, key: &Q) -> &Self::Output {
@@ -186,21 +183,21 @@ where
     }
 }
 
-/// Entry can be a leaf or a sub map
+/// Node can be a leaf or a sub map
 #[derive(Clone)]
-pub enum Entry<K, V, S = std::collections::hash_map::RandomState> {
+pub enum Node<K, V, S = std::collections::hash_map::RandomState> {
     /// A node containing `V`
     Leaf(V),
     /// A sub map
     Branch(NestedMap<K, V, S>),
 }
 
-impl<K, V, S> Entry<K, V, S>
+impl<K, V, S> Node<K, V, S>
 where
     K: Eq + std::hash::Hash,
     S: std::hash::BuildHasher,
 {
-    /// Gets a reference to the value form `key` from this entry if it is a nested entry
+    /// Gets a reference to the value form `key` from this node if it is a branch
     pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&Self>
     where
         K: std::borrow::Borrow<Q>,
@@ -213,7 +210,7 @@ where
         }
     }
 
-    /// Gets a mutable reference to the value form `key` from this entry if it is a nested entry
+    /// Gets a mutable reference to the value form `key` from this node if it is a bracnch
     pub fn get_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<&mut Self>
     where
         K: std::borrow::Borrow<Q>,
@@ -227,25 +224,25 @@ where
     }
 }
 
-impl<K, V, S> From<V> for Entry<K, V, S> {
+impl<K, V, S> From<V> for Node<K, V, S> {
     fn from(value: V) -> Self {
         Self::Leaf(value)
     }
 }
 
-impl<K, V, S> From<NestedMap<K, V, S>> for Entry<K, V, S> {
+impl<K, V, S> From<NestedMap<K, V, S>> for Node<K, V, S> {
     fn from(map: NestedMap<K, V, S>) -> Self {
         Self::Branch(map)
     }
 }
 
-impl<K, V, S> PartialEq for Entry<K, V, S>
+impl<K, V, S> PartialEq for Node<K, V, S>
 where
     K: Eq + std::hash::Hash,
     V: PartialEq,
     S: std::hash::BuildHasher,
 {
-    fn eq(&self, other: &Entry<K, V, S>) -> bool {
+    fn eq(&self, other: &Node<K, V, S>) -> bool {
         match self {
             Self::Leaf(leaf) => {
                 if let Self::Leaf(other_leaf) = other {
@@ -265,7 +262,7 @@ where
     }
 }
 
-impl<K, V, S> Eq for Entry<K, V, S>
+impl<K, V, S> Eq for Node<K, V, S>
 where
     K: Eq + std::hash::Hash,
     V: Eq,
@@ -273,7 +270,7 @@ where
 {
 }
 
-impl<K, V, S> std::fmt::Debug for Entry<K, V, S>
+impl<K, V, S> std::fmt::Debug for Node<K, V, S>
 where
     K: std::fmt::Debug,
     V: std::fmt::Debug,
@@ -286,13 +283,13 @@ where
     }
 }
 
-impl<K, Q: ?Sized, V, S> std::ops::Index<&Q> for Entry<K, V, S>
+impl<K, Q: ?Sized, V, S> std::ops::Index<&Q> for Node<K, V, S>
 where
     K: Eq + std::hash::Hash + std::borrow::Borrow<Q>,
     Q: Eq + std::hash::Hash,
     S: std::hash::BuildHasher,
 {
-    type Output = Entry<K, V, S>;
+    type Output = Node<K, V, S>;
 
     #[inline]
     fn index(&self, key: &Q) -> &Self::Output {
@@ -307,8 +304,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        Entry::{Branch, Leaf},
         NestedMap,
+        Node::{Branch, Leaf},
     };
 
     macro_rules! own {
@@ -318,14 +315,14 @@ mod tests {
     }
 
     #[test]
-    fn entry_from_node() {
+    fn node_from_leaf() {
         let mut map = NestedMap::new();
         assert_eq!(map.insert("key", "value".into()), None);
         assert_eq!(map.get("key"), Some(&Leaf("value")));
     }
 
     #[test]
-    fn entry_from_map() {
+    fn branch_from_map() {
         let mut map = NestedMap::new();
         let mut inner = NestedMap::new();
         inner.insert("inner_key", "inner_value".into());

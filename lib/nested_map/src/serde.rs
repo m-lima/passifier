@@ -1,5 +1,5 @@
-use super::Entry;
 use super::NestedMap;
+use super::Node;
 
 impl<K, V, S> serde::Serialize for NestedMap<K, V, S>
 where
@@ -26,15 +26,14 @@ where
         DE: serde::Deserializer<'d>,
     {
         Ok(Self(
-            <std::collections::HashMap<K, Entry<K, V, S>, S> as serde::Deserialize>::deserialize(
+            <std::collections::HashMap<K, Node<K, V, S>, S> as serde::Deserialize>::deserialize(
                 deserializer,
             )?,
         ))
     }
 }
 
-#[cfg(feature = "serde")]
-impl<K, V, S> serde::Serialize for Entry<K, V, S>
+impl<K, V, S> serde::Serialize for Node<K, V, S>
 where
     K: Eq + std::hash::Hash + serde::Serialize,
     V: serde::Serialize,
@@ -52,16 +51,15 @@ where
 
         #[cfg(not(feature = "flatten"))]
         match self {
-            Self::Leaf(leaf) => serializer.serialize_newtype_variant("Entry", 0, "Leaf", leaf),
+            Self::Leaf(leaf) => serializer.serialize_newtype_variant("Node", 0, "Leaf", leaf),
             Self::Branch(branch) => {
-                serializer.serialize_newtype_variant("Entry", 1, "Branch", branch)
+                serializer.serialize_newtype_variant("Node", 1, "Branch", branch)
             }
         }
     }
 }
 
-#[cfg(feature = "serde")]
-impl<'d, K, V, S> serde::Deserialize<'d> for Entry<K, V, S>
+impl<'d, K, V, S> serde::Deserialize<'d> for Node<K, V, S>
 where
     K: Eq + std::hash::Hash + serde::Deserialize<'d>,
     V: serde::Deserialize<'d>,
@@ -93,7 +91,7 @@ where
         //     type Value = NestedMap<K, V, S>;
 
         //     fn expecting(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        //         fmt.write_str("`Entry::Branch`")
+        //         fmt.write_str("`Node::Branch`")
         //     }
 
         //     fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
@@ -121,7 +119,7 @@ where
         //     type Value = V;
 
         //     fn expecting(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        //         fmt.write_str("`Entry::Leaf`")
+        //         fmt.write_str("`Node::Leaf`")
         //     }
 
         //     fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -140,7 +138,7 @@ where
         //         std::marker::PhantomData::<S>,
         //         std::marker::PhantomData::<&'d ()>,
         //     ))
-        //     .map(Entry::Branch)
+        //     .map(Node::Branch)
         //     .or_else(|_| {
         //         deserializer
         //             .deserialize_newtype_struct(
@@ -150,7 +148,7 @@ where
         //                     std::marker::PhantomData::<&'d ()>,
         //                 ),
         //             )
-        //             .map(Entry::Leaf)
+        //             .map(Node::Leaf)
         //     })
 
         let content =
@@ -177,7 +175,7 @@ where
         }
 
         Err(serde::de::Error::custom(
-            "data did not match any variant of untagged enum Entry",
+            "data did not match any variant of untagged enum Node",
         ))
     }
 
@@ -187,16 +185,16 @@ where
     where
         DE: serde::Deserializer<'d>,
     {
-        enum EntryType {
+        enum NodeType {
             Leaf,
             Branch,
         }
 
-        struct EntryTypeVisitor;
+        struct NodeTypeVisitor;
         const VARIANTS: [&str; 2] = ["Leaf", "Branch"];
 
-        impl<'d> serde::de::Visitor<'d> for EntryTypeVisitor {
-            type Value = EntryType;
+        impl<'d> serde::de::Visitor<'d> for NodeTypeVisitor {
+            type Value = NodeType;
 
             fn expecting(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 fmt.write_str("`Leaf` or `Branch`")
@@ -207,8 +205,8 @@ where
                 E: serde::de::Error,
             {
                 match value {
-                    0 => Ok(EntryType::Leaf),
-                    1 => Ok(EntryType::Branch),
+                    0 => Ok(NodeType::Leaf),
+                    1 => Ok(NodeType::Branch),
                     _ => Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Unsigned(value),
                         &"variant index 0 <= i < 2",
@@ -221,8 +219,8 @@ where
                 E: serde::de::Error,
             {
                 match value {
-                    "Leaf" => Ok(EntryType::Leaf),
-                    "Branch" => Ok(EntryType::Branch),
+                    "Leaf" => Ok(NodeType::Leaf),
+                    "Branch" => Ok(NodeType::Branch),
                     _ => Err(serde::de::Error::unknown_variant(value, &VARIANTS)),
                 }
             }
@@ -232,8 +230,8 @@ where
                 E: serde::de::Error,
             {
                 match value {
-                    b"Leaf" => Ok(EntryType::Leaf),
-                    b"Branch" => Ok(EntryType::Branch),
+                    b"Leaf" => Ok(NodeType::Leaf),
+                    b"Branch" => Ok(NodeType::Branch),
                     _ => {
                         let value_str = String::from_utf8_lossy(value);
                         Err(serde::de::Error::unknown_variant(&value_str, &VARIANTS))
@@ -242,16 +240,16 @@ where
             }
         }
 
-        impl<'d> serde::Deserialize<'d> for EntryType {
+        impl<'d> serde::Deserialize<'d> for NodeType {
             fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
             where
                 D: serde::Deserializer<'d>,
             {
-                deserializer.deserialize_identifier(EntryTypeVisitor)
+                deserializer.deserialize_identifier(NodeTypeVisitor)
             }
         }
 
-        struct EntryVisitor<'d, K, V, S>(
+        struct NodeVisitor<'d, K, V, S>(
             std::marker::PhantomData<K>,
             std::marker::PhantomData<V>,
             std::marker::PhantomData<S>,
@@ -262,15 +260,15 @@ where
             V: serde::Deserialize<'d>,
             S: Default + std::hash::BuildHasher;
 
-        impl<'d, K, V, S> serde::de::Visitor<'d> for EntryVisitor<'d, K, V, S>
+        impl<'d, K, V, S> serde::de::Visitor<'d> for NodeVisitor<'d, K, V, S>
         where
             K: Eq + std::hash::Hash + serde::Deserialize<'d>,
             V: serde::Deserialize<'d>,
             S: Default + std::hash::BuildHasher,
         {
-            type Value = Entry<K, V, S>;
+            type Value = Node<K, V, S>;
             fn expecting(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                fmt.write_str("enum Entry")
+                fmt.write_str("enum Node")
             }
 
             fn visit_enum<A>(self, value: A) -> Result<Self::Value, A::Error>
@@ -278,21 +276,21 @@ where
                 A: serde::de::EnumAccess<'d>,
             {
                 match value.variant()? {
-                    (EntryType::Leaf, leaf) => {
-                        serde::de::VariantAccess::newtype_variant::<V>(leaf).map(Entry::Leaf)
+                    (NodeType::Leaf, leaf) => {
+                        serde::de::VariantAccess::newtype_variant::<V>(leaf).map(Node::Leaf)
                     }
-                    (EntryType::Branch, branch) => {
+                    (NodeType::Branch, branch) => {
                         serde::de::VariantAccess::newtype_variant::<NestedMap<K, V, S>>(branch)
-                            .map(Entry::Branch)
+                            .map(Node::Branch)
                     }
                 }
             }
         }
 
         deserializer.deserialize_enum(
-            "Entry",
+            "Node",
             &VARIANTS,
-            EntryVisitor(
+            NodeVisitor(
                 std::marker::PhantomData::<K>,
                 std::marker::PhantomData::<V>,
                 std::marker::PhantomData::<S>,
