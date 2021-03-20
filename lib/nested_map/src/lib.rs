@@ -173,51 +173,6 @@ where
         };
         root.remove_entry(last)
     }
-
-    // #[inline]
-    // pub fn insert_into<'a, P, Q: ?Sized>(
-    //     &mut self,
-    //     path: P,
-    //     node: Node<K, V, S>,
-    // ) -> Option<Node<K, V, S>>
-    // where
-    //     K: std::borrow::Borrow<Q> + Clone,
-    //     Q: 'a + Eq + std::hash::Hash,
-    //     P: AsRef<[&'a Q]>,
-    // {
-    //     self.insert_into_iter(path.as_ref().iter().map(Clone::clone), node)
-    // }
-
-    // pub fn insert_into_iter<'a, I, Q: ?Sized>(
-    //     &mut self,
-    //     iter: I,
-    //     node: Node<K, V, S>,
-    // ) -> Option<Node<K, V, S>>
-    // where
-    //     K: std::borrow::Borrow<Q> + Clone,
-    //     Q: 'a + Eq + std::hash::Hash,
-    //     I: Iterator<Item = &'a Q>,
-    // {
-    //     let mut peekable = iter.peekable();
-    //     let mut root = self;
-    //     let mut replaced = None;
-    //     let last = loop {
-    //         let key = peekable.next()?;
-    //         if peekable.peek().is_none() {
-    //             break key;
-    //         }
-    //         if let Some(node) = root.get_mut(key) {
-    //         } else {
-    //             root.insert(key, Node::Branch(NestedMap::<K, V, S>::new()));
-    //         }
-    //         if let Node::Branch(branch) = root.get_mut(key)? {
-    //             root = branch;
-    //         } else {
-    //             return None;
-    //         }
-    //     };
-    //     root.insert(key, value)
-    // }
 }
 
 impl<K, V, S> std::ops::Deref for NestedMap<K, V, S> {
@@ -324,6 +279,32 @@ where
     }
 }
 
+impl<K, V> Node<K, V, std::collections::hash_map::RandomState>
+where
+    K: Eq + std::hash::Hash,
+{
+    #[inline]
+    pub fn from_path<I, N>(iter: I, node: N) -> Self
+    where
+        I: DoubleEndedIterator<Item = K>,
+        N: Into<Node<K, V>>,
+    {
+        Self::from_path_rev(iter.rev(), node)
+    }
+
+    pub fn from_path_rev<I, N>(iter: I, node: N) -> Self
+    where
+        I: Iterator<Item = K>,
+        N: Into<Node<K, V>>,
+    {
+        iter.fold(node.into(), |acc, curr| {
+            let mut branch = NestedMap::<K, V>::new();
+            branch.insert(curr, acc);
+            Self::Branch(branch)
+        })
+    }
+}
+
 impl<K, V, S> From<V> for Node<K, V, S> {
     fn from(value: V) -> Self {
         Self::Leaf(value)
@@ -343,15 +324,15 @@ where
     S: std::hash::BuildHasher,
 {
     fn eq(&self, other: &Node<K, V, S>) -> bool {
-        match self {
-            Self::Leaf(leaf) => {
+        match *self {
+            Self::Leaf(ref leaf) => {
                 if let Self::Leaf(other_leaf) = other {
                     leaf.eq(other_leaf)
                 } else {
                     false
                 }
             }
-            Self::Branch(branch) => {
+            Self::Branch(ref branch) => {
                 if let Self::Branch(other_branch) = other {
                     branch.eq(other_branch)
                 } else {
@@ -376,9 +357,9 @@ where
     V: std::fmt::Debug,
 {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Leaf(leaf) => leaf.fmt(fmt),
-            Self::Branch(branch) => branch.fmt(fmt),
+        match *self {
+            Self::Leaf(ref leaf) => leaf.fmt(fmt),
+            Self::Branch(ref branch) => branch.fmt(fmt),
         }
     }
 }
@@ -405,7 +386,7 @@ where
 mod tests {
     use super::{
         NestedMap,
-        Node::{Branch, Leaf},
+        Node::{self, Branch, Leaf},
     };
 
     macro_rules! own {
@@ -428,6 +409,29 @@ mod tests {
         inner.insert("inner_key", "inner_value".into());
         map.insert("key", inner.clone().into());
         assert_eq!(map.get("key"), Some(&Branch(inner)));
+    }
+
+    #[test]
+    fn node_from_path() {
+        assert_eq!(
+            Node::<String, &'static str>::from_path(vec![].into_iter(), "value"),
+            Node::<String, &'static str>::Leaf("value")
+        );
+
+        let mut map = NestedMap::<&str, &str>::new();
+        let mut inner = NestedMap::new();
+        inner.insert("inner_key", Node::Leaf("inner_value"));
+        map.insert("key", inner.clone().into());
+
+        assert_eq!(
+            Node::from_path(vec!["inner_key"].into_iter(), "inner_value"),
+            Node::Branch(inner)
+        );
+
+        assert_eq!(
+            Node::from_path(vec!["key", "inner_key"].into_iter(), "inner_value"),
+            Node::Branch(map)
+        );
     }
 
     #[test]

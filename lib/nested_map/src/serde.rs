@@ -44,15 +44,15 @@ where
         SE: serde::Serializer,
     {
         #[cfg(feature = "flatten")]
-        match self {
-            Self::Leaf(leaf) => leaf.serialize(serializer),
-            Self::Branch(branch) => branch.serialize(serializer),
+        match *self {
+            Self::Leaf(ref leaf) => leaf.serialize(serializer),
+            Self::Branch(ref branch) => branch.serialize(serializer),
         }
 
         #[cfg(not(feature = "flatten"))]
-        match self {
-            Self::Leaf(leaf) => serializer.serialize_newtype_variant("Node", 0, "Leaf", leaf),
-            Self::Branch(branch) => {
+        match *self {
+            Self::Leaf(ref leaf) => serializer.serialize_newtype_variant("Node", 0, "Leaf", leaf),
+            Self::Branch(ref branch) => {
                 serializer.serialize_newtype_variant("Node", 1, "Branch", branch)
             }
         }
