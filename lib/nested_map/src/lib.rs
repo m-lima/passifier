@@ -29,16 +29,35 @@ where
 {
     // [ ] entry
     // [ ] get_key_value
-    // [ ] contains_key
     // [ ] insert
     // [ ] retain
     // [ ] into_keys
+    // [x] contains_key
     // [x] get
     // [x] get_mut
     // [x] remove
     // [x] remove_entry
 
     // [ ] get_last_path
+
+    #[inline]
+    pub fn contains_path<'a, P, Q: ?Sized>(&self, path: P) -> bool
+    where
+        K: std::borrow::Borrow<Q>,
+        Q: 'a + Eq + std::hash::Hash,
+        P: AsRef<[&'a Q]>,
+    {
+        self.contains_path_iter(path.as_ref().iter().map(Clone::clone))
+    }
+
+    pub fn contains_path_iter<'a, I, Q: ?Sized>(&self, iter: I) -> bool
+    where
+        K: std::borrow::Borrow<Q>,
+        Q: 'a + Eq + std::hash::Hash,
+        I: Iterator<Item = &'a Q>,
+    {
+        self.get_from_iter(iter).is_some()
+    }
 
     #[inline]
     pub fn get_from<'a, P, Q: ?Sized>(&self, path: P) -> Option<&Node<K, V, S>>
@@ -154,6 +173,51 @@ where
         };
         root.remove_entry(last)
     }
+
+    // #[inline]
+    // pub fn insert_into<'a, P, Q: ?Sized>(
+    //     &mut self,
+    //     path: P,
+    //     node: Node<K, V, S>,
+    // ) -> Option<Node<K, V, S>>
+    // where
+    //     K: std::borrow::Borrow<Q> + Clone,
+    //     Q: 'a + Eq + std::hash::Hash,
+    //     P: AsRef<[&'a Q]>,
+    // {
+    //     self.insert_into_iter(path.as_ref().iter().map(Clone::clone), node)
+    // }
+
+    // pub fn insert_into_iter<'a, I, Q: ?Sized>(
+    //     &mut self,
+    //     iter: I,
+    //     node: Node<K, V, S>,
+    // ) -> Option<Node<K, V, S>>
+    // where
+    //     K: std::borrow::Borrow<Q> + Clone,
+    //     Q: 'a + Eq + std::hash::Hash,
+    //     I: Iterator<Item = &'a Q>,
+    // {
+    //     let mut peekable = iter.peekable();
+    //     let mut root = self;
+    //     let mut replaced = None;
+    //     let last = loop {
+    //         let key = peekable.next()?;
+    //         if peekable.peek().is_none() {
+    //             break key;
+    //         }
+    //         if let Some(node) = root.get_mut(key) {
+    //         } else {
+    //             root.insert(key, Node::Branch(NestedMap::<K, V, S>::new()));
+    //         }
+    //         if let Node::Branch(branch) = root.get_mut(key)? {
+    //             root = branch;
+    //         } else {
+    //             return None;
+    //         }
+    //     };
+    //     root.insert(key, value)
+    // }
 }
 
 impl<K, V, S> std::ops::Deref for NestedMap<K, V, S> {
