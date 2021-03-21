@@ -1,6 +1,33 @@
 use super::store;
 use anyhow::Context;
 
+pub(super) fn load_file<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<store::Store> {
+    let crypter = make_crypter().with_context(|| "Creating key")?;
+    let data = read_from_file(path).with_context(|| "Reading from file")?;
+    Ok(crypter.decrypt(&data).with_context(|| "Decrypting")?)
+}
+
+pub(super) fn save_file<P: AsRef<std::path::Path>>(
+    store: &store::Store,
+    path: P,
+) -> anyhow::Result<()> {
+    let crypter = make_crypter().with_context(|| "Creating key")?;
+    let encrypted = crypter.encrypt(store).with_context(|| "Encrypting")?;
+    Ok(save_to_file(&encrypted, path).with_context(|| "Writing to file")?)
+}
+
+pub(super) fn load_directory<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<store::Store> {
+    let store = store::Store::from(directory_to_map(path)?);
+    Ok(store)
+}
+
+pub(super) fn save_directory<P: AsRef<std::path::Path>>(
+    _store: &store::Store,
+    _path: P,
+) -> anyhow::Result<()> {
+    anyhow::bail!("S3 not yet implemented")
+}
+
 fn save_to_file<P: AsRef<std::path::Path>>(data: &[u8], path: P) -> Result<(), std::io::Error> {
     use std::io::Write;
     std::fs::File::create(path)?.write_all(data).map(|_| ())
@@ -20,14 +47,39 @@ fn make_crypter() -> anyhow::Result<crypter::Crypter> {
     Ok(crypter::Crypter::new(password))
 }
 
-pub(super) fn load<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<store::Store> {
-    let crypter = make_crypter().with_context(|| "Creating key")?;
-    let data = read_from_file(path).with_context(|| "Reading from file")?;
-    Ok(crypter.decrypt(&data).with_context(|| "Decrypting")?)
+fn directory_to_map<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<store::NestedMap> {
+    let mut map = store::NestedMap::new();
+    for maybe_entry in path.as_ref().read_dir()? {
+        let value = maybe_entry.map(|e| e.path())?;
+        if let Some(key) = value.file_name().map(|name| {
+            name.to_str()
+                .ok_or_else(|| anyhow::anyhow!("bad file name"))
+        }) {
+            map.insert(
+                String::from(key?),
+                if value.is_dir() {
+                    store::Node::Branch(directory_to_map(value)?)
+                } else {
+                    read_file(value)?
+                },
+            );
+        }
+    }
+    Ok(map)
 }
 
-pub(super) fn save<P: AsRef<std::path::Path>>(store: &store::Store, path: P) -> anyhow::Result<()> {
-    let crypter = make_crypter().with_context(|| "Creating key")?;
-    let encrypted = crypter.encrypt(store).with_context(|| "Encrypting")?;
-    Ok(save_to_file(&encrypted, path).with_context(|| "Writing to file")?)
+fn read_file<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<store::Node> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+
+    if core::str::from_utf8(&buffer).is_ok() {
+        // SAFETY: Previously checked
+        Ok(store::Node::Leaf(store::Entry::String(unsafe {
+            String::from_utf8_unchecked(buffer)
+        })))
+    } else {
+        Ok(store::Node::Leaf(store::Entry::Binary(buffer)))
+    }
 }

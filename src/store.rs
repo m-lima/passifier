@@ -8,8 +8,13 @@ pub(super) struct Store(NestedMap);
 
 impl Store {
     pub fn new() -> Self {
-        Self(NestedMap::new())
+        Self::from(NestedMap::new())
     }
+
+    pub fn from(map: NestedMap) -> Self {
+        Self(map)
+    }
+
     pub fn create(&mut self, write: args::Write) -> anyhow::Result<()> {
         let args::Write { path, secret } = write;
         if should_delete(&secret) {

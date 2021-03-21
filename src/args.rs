@@ -132,6 +132,7 @@ impl std::str::FromStr for Path {
 #[derive(Debug)]
 pub enum Source {
     File(std::path::PathBuf),
+    Directory(std::path::PathBuf),
     S3(String),
 }
 
@@ -147,7 +148,12 @@ impl std::str::FromStr for Source {
                 Ok(Self::S3(String::from(path)))
             }
         } else {
-            Ok(Self::File(std::path::PathBuf::from_str(string)?))
+            let path = std::path::PathBuf::from_str(string)?;
+            if path.is_dir() {
+                Ok(Self::Directory(std::path::PathBuf::from_str(string)?))
+            } else {
+                Ok(Self::File(std::path::PathBuf::from_str(string)?))
+            }
         }
     }
 }

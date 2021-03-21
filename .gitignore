@@ -1,4 +1,9 @@
 **/target
-test_store
 
+# Test
+test_store
+test_store_dir
+
+# IDE
 .idea
+.vimspector.json
