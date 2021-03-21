@@ -160,25 +160,6 @@ mod tests {
         };
     }
 
-    macro_rules! update_empty {
-        ($($path:literal),*) => {{
-            let mut updated = make_store();
-            let mut deleted = make_store();
-            super::update(&mut updated, update!([$($path),*])).unwrap();
-            super::delete(&mut deleted, delete!($($path),*)).unwrap();
-            assert_eq!(updated, deleted);
-        }};
-    }
-
-    macro_rules! test_delete {
-        ([$($path:literal),*], $expected:literal) => {{
-            let mut store = make_store();
-            super::delete(&mut store, delete!($($path),*)).unwrap();
-            assert_eq!(store, parse!($expected));
-        }};
-
-    }
-
     fn make_store() -> Store {
         parse!(MAP)
     }
@@ -189,7 +170,7 @@ mod tests {
 
         let mut store = Store::new();
 
-        create(&mut store, create!(["new"], "new value")).unwrap();
+        create(&mut store, create!(["new"], "new_value")).unwrap();
         assert_eq!(store, parse!(r#"{"new":"new_value"}"#));
 
         create(&mut store, create!(["foo"], "new_value")).unwrap();
@@ -367,6 +348,16 @@ mod tests {
 
     #[test]
     fn update_empty_just_deletes() {
+        macro_rules! update_empty {
+            ($($path:literal),*) => {{
+                let mut updated = make_store();
+                let mut deleted = make_store();
+                super::update(&mut updated, update!([$($path),*])).unwrap();
+                super::delete(&mut deleted, delete!($($path),*)).unwrap();
+                assert_eq!(updated, deleted);
+            }};
+        }
+
         update_empty!["binary"];
         update_empty!["sibling"];
         update_empty!["nested"];
@@ -399,6 +390,15 @@ mod tests {
 
     #[test]
     fn delete() {
+        macro_rules! test_delete {
+            ([$($path:literal),*], $expected:literal) => {{
+                let mut store = make_store();
+                super::delete(&mut store, delete!($($path),*)).unwrap();
+                assert_eq!(store, parse!($expected));
+            }};
+
+        }
+
         test_delete!(
             ["binary"],
             r#"{
