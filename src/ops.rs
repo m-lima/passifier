@@ -47,9 +47,30 @@ pub(super) fn print(store: Store, print: &args::Print) -> anyhow::Result<()> {
 }
 
 pub(super) fn delete_path(store: &mut Store, path: &args::Path) -> anyhow::Result<()> {
+    fn clean_up(store: &mut Store, path: &[String]) -> bool {
+        if store.is_empty() {
+            return true;
+        }
+
+        if let Some(true) = store.get_mut(&path[0]).map(|node| {
+            if let Node::Branch(ref mut branch) = *node {
+                clean_up(branch, &path[1..])
+            } else {
+                unreachable!("impossible to not be a branch");
+            }
+        }) {
+            store.remove(&path[0]);
+        }
+        store.is_empty()
+    }
+
     store
         .remove_from_iter(path.iter())
         .ok_or_else(|| anyhow::anyhow!("Not found"))?;
+
+    if clean_up(store, &path.0) {
+        store.remove(&path.0[0]);
+    }
 
     Ok(())
 }
@@ -484,6 +505,10 @@ mod tests {
                  "sibling": "outer_sibling"
                }"#
         );
+
+        let mut store = parse!(r#"{"one":{"two":{"three":"value"}}}"#);
+        assert!(super::delete(&mut store, delete!["one", "two", "three"]).is_ok());
+        assert_eq!(store, parse!("{}"));
     }
 
     #[test]

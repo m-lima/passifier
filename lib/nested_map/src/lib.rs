@@ -568,6 +568,7 @@ mod tests {
 
         let mut inner = NestedMap::new();
         inner.insert(own!("inner_key"), "inner_value".into());
+        inner.insert(own!("other_inner_key"), "other_inner_value".into());
 
         map.insert(own!("nested"), inner.clone().into());
         map.insert(own!("nested2"), inner.clone().into());
@@ -580,6 +581,11 @@ mod tests {
             Some(Leaf("inner_value"))
         );
         assert_eq!(map.remove_from(["nested", "inner_key"]), None);
+        assert_eq!(
+            map.remove_from(["nested", "other_inner_key"]),
+            Some(Leaf("other_inner_value"))
+        );
+        assert_eq!(map.remove_from(["nested", "other_inner_key"]), None);
         assert_eq!(map.remove_from(["nested2"]), Some(Branch(inner.clone())));
         assert_eq!(map.remove_from(["key"]), Some(Leaf("value")));
     }
