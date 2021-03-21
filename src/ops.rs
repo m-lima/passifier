@@ -4,10 +4,10 @@ pub(super) fn create(store: &mut Store, write: args::Write) -> anyhow::Result<()
     let args::Write { path, secret } = write;
     if should_delete(&secret) {
         anyhow::bail!("Empty secret");
-    } else if store.contains_path_iter(path.iter()) {
-        anyhow::bail!("Conflict");
-    } else {
+    } else if is_new_entry(store, &path) {
         store.insert_into_iter(path.iter(), secret);
+    } else {
+        anyhow::bail!("Conflict");
     }
 
     Ok(())
@@ -93,6 +93,22 @@ fn should_delete(secret: &Node) -> bool {
         }
     }
     false
+}
+
+fn is_new_entry(store: &Store, path: &args::Path) -> bool {
+    fn inspect(store: &Store, path: &[String]) -> bool {
+        if path.is_empty() {
+            false
+        } else {
+            match store.get(&path[0]) {
+                None => true,
+                Some(Node::Leaf(_)) => false,
+                Some(Node::Branch(branch)) => inspect(branch, &path[1..]),
+            }
+        }
+    }
+
+    inspect(store, &path.0)
 }
 
 #[cfg(test)]
