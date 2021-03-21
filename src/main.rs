@@ -2,41 +2,7 @@
 
 mod args;
 mod io;
-mod ops;
-
-type Store = nested_map::NestedMap<String, Entry>;
-type Node = nested_map::Node<String, Entry>;
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
-#[serde(untagged)]
-enum Entry {
-    String(String),
-    Binary(Vec<u8>),
-}
-
-impl From<String> for Entry {
-    fn from(string: String) -> Self {
-        Self::String(string)
-    }
-}
-
-impl From<&str> for Entry {
-    fn from(string: &str) -> Self {
-        Self::String(String::from(string))
-    }
-}
-
-impl From<Vec<u8>> for Entry {
-    fn from(vec: Vec<u8>) -> Self {
-        Self::Binary(vec)
-    }
-}
-
-impl From<&[u8]> for Entry {
-    fn from(vec: &[u8]) -> Self {
-        Self::Binary(vec.iter().map(Clone::clone).collect())
-    }
-}
+mod store;
 
 fn main() -> anyhow::Result<()> {
     use clap::Clap;
@@ -50,15 +16,15 @@ fn main() -> anyhow::Result<()> {
             }
         }
     } else {
-        Store::new()
+        store::Store::new()
     };
 
     match arguments.action {
-        args::Action::Create(write) => ops::create(&mut store, write)?,
-        args::Action::Read(read) => ops::read(&store, read).map(|_| ())?,
-        args::Action::Update(write) => ops::update(&mut store, write)?,
-        args::Action::Delete(delete) => ops::delete(&mut store, delete)?,
-        args::Action::Print(print) => return ops::print(store, &print),
+        args::Action::Create(write) => store.create(write)?,
+        args::Action::Read(read) => store.read(read).map(|_| ())?,
+        args::Action::Update(write) => store.update(write)?,
+        args::Action::Delete(delete) => store.delete(delete)?,
+        args::Action::Print(print) => return store.print(&print),
     }
 
     if let Some(save) = arguments.save {

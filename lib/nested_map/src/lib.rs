@@ -243,6 +243,14 @@ where
     }
 }
 
+impl<K, V, S> Eq for NestedMap<K, V, S>
+where
+    K: Eq + std::hash::Hash,
+    V: Eq,
+    S: std::hash::BuildHasher,
+{
+}
+
 impl<K, V, S> std::fmt::Debug for NestedMap<K, V, S>
 where
     K: std::fmt::Debug,

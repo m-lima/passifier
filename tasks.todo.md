@@ -1,6 +1,4 @@
 - [ ] Break down test into what it is actually asserting
-- [ ] Consider moving 'ops' to 'lib/store'
-  - [ ] Condier how to handle auto-delete empties
 - [ ] Implement "S3"
 - [ ] Create, delete, update make no sense without output
 - [ ] Read, print make no sense with "--save"
@@ -21,6 +19,8 @@
 - [X] Implement "update"
 - [X] Test "update"
 - [X] Update with empty Nested is same as delete
+- [X] Consider moving 'ops' to 'lib/store'
+  - [X] Consider how to handle auto-delete empties
 
 
 "-s" takes optional parameter. If none is given, sabe back using same source/password. If "-s" is missing completely, pipe. Piping can be binary, json, or pretty json

@@ -1,75 +1,125 @@
-use super::{args, Node, Store};
+use super::args;
 
-pub(super) fn create(store: &mut Store, write: args::Write) -> anyhow::Result<()> {
-    let args::Write { path, secret } = write;
-    if should_delete(&secret) {
-        anyhow::bail!("Empty secret");
-    } else if is_new_entry(store, &path) {
-        store.insert_into_iter(path.iter(), secret);
-    } else {
-        anyhow::bail!("Conflict");
+pub(super) type NestedMap = nested_map::NestedMap<String, Entry>;
+pub(super) type Node = nested_map::Node<String, Entry>;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
+pub(super) struct Store(NestedMap);
+
+impl Store {
+    pub fn new() -> Self {
+        Self(NestedMap::new())
+    }
+    pub fn create(&mut self, write: args::Write) -> anyhow::Result<()> {
+        let args::Write { path, secret } = write;
+        if should_delete(&secret) {
+            anyhow::bail!("Empty secret");
+        } else if is_new_entry(self, &path) {
+            self.0.insert_into_iter(path.iter(), secret);
+        } else {
+            anyhow::bail!("Conflict");
+        }
+
+        Ok(())
     }
 
-    Ok(())
-}
-
-pub(super) fn read(store: &Store, read: args::Read) -> anyhow::Result<&Node> {
-    let args::Read { path, pretty } = read;
-    store
-        .get_from_iter(path.iter())
-        .ok_or_else(|| anyhow::anyhow!("Not found"))
-        .and_then(|node| {
-            print_node(node, pretty)?;
-            Ok(node)
-        })
-}
-
-pub(super) fn update(store: &mut Store, write: args::Write) -> anyhow::Result<()> {
-    let args::Write { path, secret } = write;
-    if !store.contains_path_iter(path.iter()) {
-        anyhow::bail!("Not found");
-    } else if should_delete(&secret) {
-        delete_path(store, &path)?;
-    } else {
-        store.insert_into_iter(path.iter(), secret);
+    pub fn read(&self, read: args::Read) -> anyhow::Result<&Node> {
+        let args::Read { path, pretty } = read;
+        self.get_from_iter(path.iter())
+            .ok_or_else(|| anyhow::anyhow!("Not found"))
+            .and_then(|node| {
+                print_node(node, pretty)?;
+                Ok(node)
+            })
     }
 
-    Ok(())
+    pub fn update(&mut self, write: args::Write) -> anyhow::Result<()> {
+        let args::Write { path, secret } = write;
+        if !self.contains_path_iter(path.iter()) {
+            anyhow::bail!("Not found");
+        } else if should_delete(&secret) {
+            delete_path(self, &path)?;
+        } else {
+            self.0.insert_into_iter(path.iter(), secret);
+        }
+
+        Ok(())
+    }
+
+    pub fn delete(&mut self, delete: args::Delete) -> anyhow::Result<()> {
+        let args::Delete { path } = delete;
+        delete_path(self, &path)
+    }
+
+    pub fn print(self, print: &args::Print) -> anyhow::Result<()> {
+        print_node(&Node::Branch(self.0), print.pretty)
+    }
 }
 
-pub(super) fn delete(store: &mut Store, delete: args::Delete) -> anyhow::Result<()> {
-    let args::Delete { path } = delete;
-    delete_path(store, &path)
+impl std::ops::Deref for Store {
+    type Target = NestedMap;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
-pub(super) fn print(store: Store, print: &args::Print) -> anyhow::Result<()> {
-    print_node(&Node::Branch(store), print.pretty)
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
+#[serde(untagged)]
+pub(super) enum Entry {
+    String(String),
+    Binary(Vec<u8>),
 }
 
-pub(super) fn delete_path(store: &mut Store, path: &args::Path) -> anyhow::Result<()> {
-    fn clean_up(store: &mut Store, path: &[String]) -> bool {
-        if store.is_empty() {
+impl From<String> for Entry {
+    fn from(string: String) -> Self {
+        Self::String(string)
+    }
+}
+
+impl From<&str> for Entry {
+    fn from(string: &str) -> Self {
+        Self::String(String::from(string))
+    }
+}
+
+impl From<Vec<u8>> for Entry {
+    fn from(vec: Vec<u8>) -> Self {
+        Self::Binary(vec)
+    }
+}
+
+impl From<&[u8]> for Entry {
+    fn from(vec: &[u8]) -> Self {
+        Self::Binary(vec.iter().map(Clone::clone).collect())
+    }
+}
+
+fn delete_path(store: &mut Store, path: &args::Path) -> anyhow::Result<()> {
+    fn clean_up(map: &mut NestedMap, path: &[String]) -> bool {
+        if map.is_empty() {
             return true;
         }
 
-        if let Some(true) = store.get_mut(&path[0]).map(|node| {
+        if let Some(true) = map.get_mut(&path[0]).map(|node| {
             if let Node::Branch(ref mut branch) = *node {
                 clean_up(branch, &path[1..])
             } else {
                 unreachable!("impossible to not be a branch");
             }
         }) {
-            store.remove(&path[0]);
+            map.remove(&path[0]);
         }
-        store.is_empty()
+        map.is_empty()
     }
 
     store
+        .0
         .remove_from_iter(path.iter())
         .ok_or_else(|| anyhow::anyhow!("Not found"))?;
 
-    if clean_up(store, &path.0) {
-        store.remove(&path.0[0]);
+    if clean_up(&mut store.0, &path.0) {
+        store.0.remove(&path.0[0]);
     }
 
     Ok(())
@@ -96,11 +146,11 @@ fn should_delete(secret: &Node) -> bool {
 }
 
 fn is_new_entry(store: &Store, path: &args::Path) -> bool {
-    fn inspect(store: &Store, path: &[String]) -> bool {
+    fn inspect(map: &NestedMap, path: &[String]) -> bool {
         if path.is_empty() {
             false
         } else {
-            match store.get(&path[0]) {
+            match map.get(&path[0]) {
                 None => true,
                 Some(Node::Leaf(_)) => false,
                 Some(Node::Branch(branch)) => inspect(branch, &path[1..]),
@@ -113,8 +163,8 @@ fn is_new_entry(store: &Store, path: &args::Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::super::Entry;
-    use super::{args, Node, Store};
+    use super::Entry;
+    use super::{args, NestedMap, Node, Store};
 
     static MAP: &str = r#"{
                             "binary": [ 245, 107, 95, 100 ],
@@ -137,7 +187,13 @@ mod tests {
 
     macro_rules! parse {
         ($string:expr) => {
-            serde_json::from_str::<Store>($string).unwrap().into()
+            serde_json::from_str::<NestedMap>($string).unwrap().into()
+        };
+    }
+
+    macro_rules! store {
+        ($string:expr) => {
+            Store(parse!($string))
         };
     }
 
@@ -197,36 +253,33 @@ mod tests {
         };
     }
 
-    fn make_store() -> Store {
-        parse!(MAP)
-    }
-
     #[test]
     fn create() {
-        use super::create;
-
         let mut store = Store::new();
 
-        create(&mut store, create!(["new"], "new_value")).unwrap();
-        assert_eq!(store, parse!(r#"{"new":"new_value"}"#));
+        store.create(create!(["new"], "new_value")).unwrap();
+        assert_eq!(store, store!(r#"{"new":"new_value"}"#));
 
-        create(&mut store, create!(["foo"], "new_value")).unwrap();
-        assert_eq!(store, parse!(r#"{"new":"new_value","foo":"new_value"}"#));
+        store.create(create!(["foo"], "new_value")).unwrap();
+        assert_eq!(store, store!(r#"{"new":"new_value","foo":"new_value"}"#));
 
-        create(&mut store, create!(["nested", "inner", "foo"], "bar")).unwrap();
+        store
+            .create(create!(["nested", "inner", "foo"], "bar"))
+            .unwrap();
         assert_eq!(
             store,
-            parse!(r#"{"new":"new_value","foo":"new_value","nested":{"inner":{"foo":"bar"}}}"#)
+            store!(r#"{"new":"new_value","foo":"new_value","nested":{"inner":{"foo":"bar"}}}"#)
         );
 
-        create(
-            &mut store,
-            create!(["nested", "other", "foo", "deep", "deeper"], "here"),
-        )
-        .unwrap();
+        store
+            .create(create!(
+                ["nested", "other", "foo", "deep", "deeper"],
+                "here"
+            ))
+            .unwrap();
         assert_eq!(
             store,
-            parse!(
+            store!(
                 r#"{"new":"new_value","foo":"new_value","nested":{"inner":{"foo":"bar"},"other":{"foo":{"deep":{"deeper":"here"}}}}}"#
             )
         );
@@ -234,102 +287,95 @@ mod tests {
 
     #[test]
     fn create_conflict() {
-        use super::create;
+        let mut store = store!(MAP);
 
-        let mut store = make_store();
-
-        assert!(create(&mut store, create!(["binary"], "new_value")).is_err());
-        assert!(create(&mut store, create!(["nested"], "new_value")).is_err());
-        assert!(create(&mut store, create!(["nested", "sibling"], "new_value")).is_err());
-        assert!(create(
-            &mut store,
-            create!(["nested", "sibling", "deep"], "new_value")
-        )
-        .is_err());
+        assert!(store.create(create!(["binary"], "new_value")).is_err());
+        assert!(store.create(create!(["nested"], "new_value")).is_err());
+        assert!(store
+            .create(create!(["nested", "sibling"], "new_value"))
+            .is_err());
+        assert!(store
+            .create(create!(["nested", "sibling", "deep"], "new_value"))
+            .is_err());
     }
 
     #[test]
     fn create_empty() {
-        use super::create;
-        let mut store = make_store();
-        assert!(create(&mut store, create!(["nested"])).is_err());
+        let mut store = store!(MAP);
+        assert!(store.create(create!(["nested"])).is_err());
     }
 
     #[test]
     fn read() {
-        use super::read;
-
-        let store = make_store();
+        let store = store!(MAP);
 
         assert_eq!(
-            read(&store, read!["binary"]).unwrap(),
+            store.read(read!["binary"]).unwrap(),
             &leaf![245, 107, 95, 100]
         );
 
         assert_eq!(
-            read(&store, read!["nested"]).unwrap(),
+            store.read(read!["nested"]).unwrap(),
             store.get("nested").unwrap()
         );
 
         assert_eq!(
-            read(&store, read!["nested", "inner"]).unwrap(),
+            store.read(read!["nested", "inner"]).unwrap(),
             &branch!(r#"{"deep":{"foo":"bar"}}"#)
         );
 
         assert_eq!(
-            read(&store, read!["nested", "inner", "deep"]).unwrap(),
+            store.read(read!["nested", "inner", "deep"]).unwrap(),
             &branch!(r#"{"foo":"bar"}"#)
         );
 
         assert_eq!(
-            read(&store, read!["nested", "inner", "deep", "foo"]).unwrap(),
+            store.read(read!["nested", "inner", "deep", "foo"]).unwrap(),
             &leaf!("bar")
         );
 
         assert_eq!(
-            read(&store, read!["nested", "sibling"]).unwrap(),
+            store.read(read!["nested", "sibling"]).unwrap(),
             &leaf!("inner_sibling")
         );
 
         assert_eq!(
-            read(&store, read!["binary"]).unwrap(),
+            store.read(read!["binary"]).unwrap(),
             &leaf![245, 107, 95, 100]
         );
 
         assert_eq!(
-            read(&store, read!["sibling"]).unwrap(),
+            store.read(read!["sibling"]).unwrap(),
             &leaf!("outer_sibling")
         );
     }
 
     #[test]
     fn read_not_found() {
-        use super::read;
+        let store = store!(MAP);
 
-        let store = make_store();
-
-        assert!(read(&store, read!["bla"]).is_err());
-        assert!(read(&store, read!["binary", "245"]).is_err());
-        assert!(read(&store, read!["nested", "bla"]).is_err());
-        assert!(read(&store, read!["nested", "bla", "foo"]).is_err());
-        assert!(read(&store, read!["nested", "inner", "bla"]).is_err());
-        assert!(read(&store, read!["nested", "inner", "bla", "deep"]).is_err());
-        assert!(read(&store, read!["nested", "inner", "deep", "bla"]).is_err());
-        assert!(read(&store, read!["nested", "inner", "deep", "foo", "bla"]).is_err());
-        assert!(read(&store, read![""]).is_err());
+        assert!(store.read(read!["bla"]).is_err());
+        assert!(store.read(read!["binary", "245"]).is_err());
+        assert!(store.read(read!["nested", "bla"]).is_err());
+        assert!(store.read(read!["nested", "bla", "foo"]).is_err());
+        assert!(store.read(read!["nested", "inner", "bla"]).is_err());
+        assert!(store.read(read!["nested", "inner", "bla", "deep"]).is_err());
+        assert!(store.read(read!["nested", "inner", "deep", "bla"]).is_err());
+        assert!(store
+            .read(read!["nested", "inner", "deep", "foo", "bla"])
+            .is_err());
+        assert!(store.read(read![""]).is_err());
     }
 
     #[test]
     fn update() {
-        use super::update;
-
-        let mut store = make_store();
+        let mut store = store!(MAP);
 
         // update top level
-        update(&mut store, update!(["binary"], "new")).unwrap();
+        store.update(update!(["binary"], "new")).unwrap();
         assert_eq!(
             store,
-            parse!(
+            store!(
                 r#"{
                      "binary": "new",
                      "nested": {
@@ -346,14 +392,12 @@ mod tests {
         );
 
         // update deep
-        update(
-            &mut store,
-            update!(["nested", "inner", "deep", "foo"], "new"),
-        )
-        .unwrap();
+        store
+            .update(update!(["nested", "inner", "deep", "foo"], "new"))
+            .unwrap();
         assert_eq!(
             store,
-            parse!(
+            store!(
                 r#"{
                      "binary": "new",
                      "nested": {
@@ -370,10 +414,10 @@ mod tests {
         );
 
         // update root of deep tree
-        update(&mut store, update!(["nested"], "new")).unwrap();
+        store.update(update!(["nested"], "new")).unwrap();
         assert_eq!(
             store,
-            parse!(
+            store!(
                 r#"{
                      "binary": "new",
                      "nested": "new",
@@ -387,10 +431,10 @@ mod tests {
     fn update_empty_just_deletes() {
         macro_rules! update_empty {
             ($($path:literal),*) => {{
-                let mut updated = make_store();
-                let mut deleted = make_store();
-                super::update(&mut updated, update!([$($path),*])).unwrap();
-                super::delete(&mut deleted, delete!($($path),*)).unwrap();
+                let mut updated = store!(MAP);
+                let mut deleted = store!(MAP);
+                updated.update(update!([$($path),*])).unwrap();
+                deleted.delete(delete!($($path),*)).unwrap();
                 assert_eq!(updated, deleted);
             }};
         }
@@ -406,32 +450,34 @@ mod tests {
 
     #[test]
     fn update_not_found() {
-        use super::update;
+        let mut store = store!(MAP);
 
-        let mut store = make_store();
-
-        assert!(update(&mut store, update!(["bla"], "")).is_err());
-        assert!(update(&mut store, update!(["binary", "245"], "")).is_err());
-        assert!(update(&mut store, update!(["nested", "bla"], "")).is_err());
-        assert!(update(&mut store, update!(["nested", "bla", "foo"], "")).is_err());
-        assert!(update(&mut store, update!(["nested", "inner", "bla"], "")).is_err());
-        assert!(update(&mut store, update!(["nested", "inner", "bla", "deep"], "")).is_err());
-        assert!(update(&mut store, update!(["nested", "inner", "deep", "bla"], "")).is_err());
-        assert!(update(
-            &mut store,
-            update!(["nested", "inner", "deep", "foo", "bla"], "")
-        )
-        .is_err());
-        assert!(update(&mut store, update!([""], "")).is_err());
+        assert!(store.update(update!(["bla"], "")).is_err());
+        assert!(store.update(update!(["binary", "245"], "")).is_err());
+        assert!(store.update(update!(["nested", "bla"], "")).is_err());
+        assert!(store.update(update!(["nested", "bla", "foo"], "")).is_err());
+        assert!(store
+            .update(update!(["nested", "inner", "bla"], ""))
+            .is_err());
+        assert!(store
+            .update(update!(["nested", "inner", "bla", "deep"], ""))
+            .is_err());
+        assert!(store
+            .update(update!(["nested", "inner", "deep", "bla"], ""))
+            .is_err());
+        assert!(store
+            .update(update!(["nested", "inner", "deep", "foo", "bla"], ""))
+            .is_err());
+        assert!(store.update(update!([""], "")).is_err());
     }
 
     #[test]
     fn delete() {
         macro_rules! test_delete {
             ([$($path:literal),*], $expected:literal) => {{
-                let mut store = make_store();
-                super::delete(&mut store, delete!($($path),*)).unwrap();
-                assert_eq!(store, parse!($expected));
+                let mut store = store!(MAP);
+                store.delete(delete!($($path),*)).unwrap();
+                assert_eq!(store, store!($expected));
             }};
 
         }
@@ -522,25 +568,29 @@ mod tests {
                }"#
         );
 
-        let mut store = parse!(r#"{"one":{"two":{"three":"value"}}}"#);
-        assert!(super::delete(&mut store, delete!["one", "two", "three"]).is_ok());
-        assert_eq!(store, parse!("{}"));
+        let mut store = store!(r#"{"one":{"two":{"three":"value"}}}"#);
+        assert!(store.delete(delete!["one", "two", "three"]).is_ok());
+        assert_eq!(store, store!("{}"));
     }
 
     #[test]
     fn delete_not_found() {
-        use super::delete;
+        let mut store = store!(MAP);
 
-        let mut store = make_store();
-
-        assert!(delete(&mut store, delete!["bla"]).is_err());
-        assert!(delete(&mut store, delete!["binary", "245"]).is_err());
-        assert!(delete(&mut store, delete!["nested", "bla"]).is_err());
-        assert!(delete(&mut store, delete!["nested", "bla", "foo"]).is_err());
-        assert!(delete(&mut store, delete!["nested", "inner", "bla"]).is_err());
-        assert!(delete(&mut store, delete!["nested", "inner", "bla", "deep"]).is_err());
-        assert!(delete(&mut store, delete!["nested", "inner", "deep", "bla"]).is_err());
-        assert!(delete(&mut store, delete!["nested", "inner", "deep", "foo", "bla"]).is_err());
-        assert!(delete(&mut store, delete![""]).is_err());
+        assert!(store.delete(delete!["bla"]).is_err());
+        assert!(store.delete(delete!["binary", "245"]).is_err());
+        assert!(store.delete(delete!["nested", "bla"]).is_err());
+        assert!(store.delete(delete!["nested", "bla", "foo"]).is_err());
+        assert!(store.delete(delete!["nested", "inner", "bla"]).is_err());
+        assert!(store
+            .delete(delete!["nested", "inner", "bla", "deep"])
+            .is_err());
+        assert!(store
+            .delete(delete!["nested", "inner", "deep", "bla"])
+            .is_err());
+        assert!(store
+            .delete(delete!["nested", "inner", "deep", "foo", "bla"])
+            .is_err());
+        assert!(store.delete(delete![""]).is_err());
     }
 }

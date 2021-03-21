@@ -1,3 +1,4 @@
+use super::store;
 use anyhow::Context;
 
 fn save_to_file<P: AsRef<std::path::Path>>(data: &[u8], path: P) -> Result<(), std::io::Error> {
@@ -19,13 +20,13 @@ fn make_crypter() -> anyhow::Result<crypter::Crypter> {
     Ok(crypter::Crypter::new(password))
 }
 
-pub(super) fn load<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<super::Store> {
+pub(super) fn load<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<store::Store> {
     let crypter = make_crypter().with_context(|| "Creating key")?;
     let data = read_from_file(path).with_context(|| "Reading from file")?;
     Ok(crypter.decrypt(&data).with_context(|| "Decrypting")?)
 }
 
-pub(super) fn save<P: AsRef<std::path::Path>>(store: &super::Store, path: P) -> anyhow::Result<()> {
+pub(super) fn save<P: AsRef<std::path::Path>>(store: &store::Store, path: P) -> anyhow::Result<()> {
     let crypter = make_crypter().with_context(|| "Creating key")?;
     let encrypted = crypter.encrypt(store).with_context(|| "Encrypting")?;
     Ok(save_to_file(&encrypted, path).with_context(|| "Writing to file")?)

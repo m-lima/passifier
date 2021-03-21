@@ -1,3 +1,5 @@
+use super::store;
+
 #[derive(clap::Clap, Debug)]
 #[clap(name = "Passify", version)]
 pub struct Args {
@@ -61,7 +63,7 @@ pub struct Write {
 
     /// Value for the secret
     #[clap( parse(try_from_str = parse_entry))]
-    pub(super) secret: super::Node,
+    pub(super) secret: store::Node,
 }
 
 #[derive(Debug)]
@@ -73,8 +75,8 @@ impl Path {
     }
 }
 
-fn parse_entry(string: &str) -> anyhow::Result<super::Node> {
-    fn remove_empties(node: &mut super::Node) -> bool {
+fn parse_entry(string: &str) -> anyhow::Result<store::Node> {
+    fn remove_empties(node: &mut store::Node) -> bool {
         if let nested_map::Node::Branch(branch) = node {
             let secrets = branch.keys().map(String::from).collect::<Vec<_>>();
             for secret in secrets {
@@ -98,7 +100,7 @@ fn parse_entry(string: &str) -> anyhow::Result<super::Node> {
         remove_empties(&mut entry);
         Ok(entry)
     } else {
-        Ok(super::Node::Leaf(super::Entry::String(String::from(
+        Ok(store::Node::Leaf(store::Entry::String(String::from(
             string,
         ))))
     }
@@ -152,7 +154,7 @@ impl std::str::FromStr for Source {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{Entry, Node, Store};
+    use super::store::{Entry, NestedMap, Node};
 
     #[test]
     fn parse_entry() {
@@ -178,15 +180,15 @@ mod tests {
 
         assert_eq!(
             super::parse_entry("\n{\n}").unwrap(),
-            Node::Branch(Store::new())
+            Node::Branch(NestedMap::new())
         );
 
         assert_eq!(
             super::parse_entry(r#"{"nested":{"inner":{}}}"#).unwrap(),
-            Node::Branch(Store::new())
+            Node::Branch(NestedMap::new())
         );
 
-        let mut store = Store::new();
+        let mut store = NestedMap::new();
         store.insert_into(["nested", "inner", "key"], Entry::from("value"));
         assert_eq!(
             super::parse_entry(r#"{"nested":{"inner":{"key":"value", "empty":{}}}}"#).unwrap(),
