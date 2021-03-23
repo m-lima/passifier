@@ -1,18 +1,31 @@
 use super::store;
 use anyhow::Context;
 
-pub(super) fn load_file<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<store::Store> {
-    let crypter = make_crypter().with_context(|| "Creating key")?;
+pub(super) fn load_file<P: AsRef<std::path::Path>>(
+    path: P,
+    crypter_supplier: impl Fn() -> Option<crypter::Crypter>,
+) -> anyhow::Result<store::Store> {
     let data = read_from_file(path).with_context(|| "Reading from file")?;
-    Ok(crypter.decrypt(&data).with_context(|| "Decrypting")?)
+    Ok(crypter_supplier()
+        .ok_or_else(|| anyhow::anyhow!("No crypto"))?
+        .decrypt(&data)
+        .with_context(|| "Decrypting")?)
 }
 
 pub(super) fn save_file<P: AsRef<std::path::Path>>(
     store: &store::Store,
     path: P,
+    crypter_supplier: impl Fn() -> Option<crypter::Crypter>,
+    check_conflict: bool,
 ) -> anyhow::Result<()> {
-    let crypter = make_crypter().with_context(|| "Creating key")?;
-    let encrypted = crypter.encrypt(store).with_context(|| "Encrypting")?;
+    let path = path.as_ref();
+    if check_conflict && path.exists() {
+        anyhow::bail!("File exists");
+    }
+    let encrypted = crypter_supplier()
+        .ok_or_else(|| anyhow::anyhow!("No crypto"))?
+        .encrypt(store)
+        .with_context(|| "Encrypting")?;
     Ok(save_to_file(&encrypted, path).with_context(|| "Writing to file")?)
 }
 
@@ -24,7 +37,21 @@ pub(super) fn load_directory<P: AsRef<std::path::Path>>(path: P) -> anyhow::Resu
 pub(super) fn save_directory<P: AsRef<std::path::Path>>(
     store: &store::Store,
     path: P,
+    check_conflict: bool,
 ) -> anyhow::Result<()> {
+    let path = path.as_ref();
+    if path.exists() {
+        if check_conflict {
+            anyhow::bail!("File exists");
+        } else {
+            if path.is_dir() {
+                std::fs::remove_dir_all(path)
+            } else {
+                std::fs::remove_file(path)
+            }
+            .with_context(|| "Overriding file")?;
+        }
+    }
     write_file(store, path)
 }
 
@@ -40,11 +67,6 @@ fn read_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Vec<u8>, std::io
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
     Ok(buffer)
-}
-
-fn make_crypter() -> anyhow::Result<crypter::Crypter> {
-    let password = rpassword::prompt_password_stderr("Password: ")?;
-    Ok(crypter::Crypter::new(password))
 }
 
 fn directory_to_map<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<store::NestedMap> {

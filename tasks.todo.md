@@ -1,5 +1,3 @@
-- [ ] Check overwrite
-  - [ ] When writing to dir, delete the root
 - [ ] Test with real fs
   - [ ] From/to file
   - [ ] From/to dir
@@ -30,6 +28,8 @@
 - [X] Implement from directory
 - [X] Make directory a "source"
 - [X] Implement to directory
+- [X] Check overwrite
+  - [X] When writing to dir, delete the root
 
 
 "-s" takes optional parameter. If none is given, sabe back using same source/password. If "-s" is missing completely, pipe. Piping can be binary, json, or pretty json
