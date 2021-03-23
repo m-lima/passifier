@@ -2,7 +2,8 @@
 
 # Test
 test_store
-test_store_dir
+test_store_dir_in
+test_store_dir_out
 
 # IDE
 .idea

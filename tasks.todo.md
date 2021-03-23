@@ -1,4 +1,3 @@
-- [ ] Implement to directory
 - [ ] Test with real fs
   - [ ] From/to file
   - [ ] From/to dir
@@ -28,6 +27,7 @@
   - [X] Consider how to handle auto-delete empties
 - [X] Implement from directory
 - [X] Make directory a "source"
+- [X] Implement to directory
 
 
 "-s" takes optional parameter. If none is given, sabe back using same source/password. If "-s" is missing completely, pipe. Piping can be binary, json, or pretty json

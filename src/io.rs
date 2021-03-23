@@ -22,10 +22,10 @@ pub(super) fn load_directory<P: AsRef<std::path::Path>>(path: P) -> anyhow::Resu
 }
 
 pub(super) fn save_directory<P: AsRef<std::path::Path>>(
-    _store: &store::Store,
-    _path: P,
+    store: &store::Store,
+    path: P,
 ) -> anyhow::Result<()> {
-    anyhow::bail!("S3 not yet implemented")
+    write_file(store, path)
 }
 
 fn save_to_file<P: AsRef<std::path::Path>>(data: &[u8], path: P) -> Result<(), std::io::Error> {
@@ -82,4 +82,22 @@ fn read_file<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<store::Node> 
     } else {
         Ok(store::Node::Leaf(store::Entry::Binary(buffer)))
     }
+}
+
+fn write_file<P: AsRef<std::path::Path>>(map: &store::NestedMap, path: P) -> anyhow::Result<()> {
+    std::fs::create_dir_all(path.as_ref())?;
+    for (name, node) in map.iter() {
+        match node {
+            store::Node::Leaf(store::Entry::String(value)) => {
+                std::fs::write(path.as_ref().join(name), value)?;
+            }
+            store::Node::Leaf(store::Entry::Binary(value)) => {
+                std::fs::write(path.as_ref().join(name), value)?;
+            }
+            store::Node::Branch(branch) => {
+                write_file(branch, path.as_ref().join(name))?;
+            }
+        }
+    }
+    Ok(())
 }

@@ -182,6 +182,34 @@ fn parse_output(string: &str) -> anyhow::Result<Source> {
 mod tests {
     use super::store::{Entry, NestedMap, Node};
 
+    struct TempDir(std::path::PathBuf);
+
+    impl TempDir {
+        fn root() -> std::path::PathBuf {
+            std::env::temp_dir().join("passifier-test")
+        }
+
+        fn new<P: AsRef<std::path::Path>>(path: P) -> Self {
+            let path = Self::root().join(path.as_ref());
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl std::ops::Deref for TempDir {
+        type Target = std::path::PathBuf;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl std::ops::Drop for TempDir {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(Self::root()).unwrap();
+        }
+    }
+
     #[test]
     fn parse_entry() {
         assert_eq!(
@@ -219,6 +247,35 @@ mod tests {
         assert_eq!(
             super::parse_entry(r#"{"nested":{"inner":{"key":"value", "empty":{}}}}"#).unwrap(),
             Node::Branch(store)
+        );
+    }
+
+    #[test]
+    fn parse_input() {
+        assert_eq!(
+            super::parse_input("s3://foo/bar").unwrap(),
+            super::Source::S3(String::from("foo/bar"))
+        );
+
+        assert!(super::parse_input("s3://").is_err());
+
+        let temp_dir = TempDir::new("parse_input");
+        let temp_file = temp_dir.join("foo");
+        std::fs::File::create(&temp_file).unwrap();
+
+        assert_eq!(
+            super::parse_input(temp_dir.to_str().unwrap()).unwrap(),
+            super::Source::Directory(std::path::PathBuf::from(temp_dir.to_str().unwrap()))
+        );
+
+        assert_eq!(
+            super::parse_input(temp_file.to_str().unwrap()).unwrap(),
+            super::Source::File(temp_file)
+        );
+
+        assert_eq!(
+            super::parse_input(".").unwrap(),
+            super::Source::Directory(std::path::PathBuf::from("."))
         );
     }
 
