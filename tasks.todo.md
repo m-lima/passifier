@@ -6,7 +6,7 @@
 - [ ] Create, delete, update make no sense without output
 - [ ] Read, print make no sense with "--save"
 - [ ] Consider implement piping
-- [ ] QT frontend
+- [ ] QT frontend (check nheko as GUI for JS-style UI)
 - [ ] Web frontend
 - [ ] Remove panics
 - [ ] Slim down store

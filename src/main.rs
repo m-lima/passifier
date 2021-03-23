@@ -6,9 +6,11 @@ mod store;
 
 fn main() -> anyhow::Result<()> {
     use clap::Clap;
-    let arguments = args::Args::parse();
+    run(args::Args::parse())
+}
 
-    let mut store = if let Some(source) = arguments.store {
+fn run(args: args::Args) -> anyhow::Result<()> {
+    let mut store = if let Some(source) = args.store {
         match source {
             args::Source::File(path) => io::load_file(path)?,
             args::Source::Directory(path) => io::load_directory(path)?,
@@ -20,7 +22,7 @@ fn main() -> anyhow::Result<()> {
         store::Store::new()
     };
 
-    match arguments.action {
+    match args.action {
         args::Action::Create(write) => store.create(write)?,
         args::Action::Read(read) => store.read(read).map(|_| ())?,
         args::Action::Update(write) => store.update(write)?,
@@ -28,7 +30,7 @@ fn main() -> anyhow::Result<()> {
         args::Action::Print(print) => return store.print(&print),
     }
 
-    if let Some(save) = arguments.save {
+    if let Some(save) = args.save {
         match save {
             args::Source::File(path) => io::save_file(&store, path)?,
             args::Source::Directory(path) => io::save_directory(&store, path)?,
