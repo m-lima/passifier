@@ -1,3 +1,5 @@
+- [ ] Check overwrite
+  - [ ] When writing to dir, delete the root
 - [ ] Test with real fs
   - [ ] From/to file
   - [ ] From/to dir
