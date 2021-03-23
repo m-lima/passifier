@@ -1,15 +1,19 @@
+- [ ] Implement to directory
+- [ ] Test with real fs
+  - [ ] From/to file
+  - [ ] From/to dir
 - [ ] Break down test into what it is actually asserting
 - [ ] Implement "S3"
 - [ ] Create, delete, update make no sense without output
 - [ ] Read, print make no sense with "--save"
 - [ ] Consider implement piping
-- [ ] Implement to directory
 - [ ] QT frontend
 - [ ] Web frontend
 - [ ] Remove panics
-- [ ] Test with real fs
-  - [ ] From/to file
-  - [ ] From/to dir
+- [ ] Slim down store
+  - [ ] Move `delete_path` recursive logic into nested_map
+  - [ ] Move `is_new_entry` recursive logic into nested_map
+  - [ ] (?) Path iterator for nested map
 - [X] Implement "create"
 - [X] Dont create empty Nested
 - [X] Remove "delete_helper"

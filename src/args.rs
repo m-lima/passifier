@@ -7,11 +7,11 @@ pub struct Args {
     pub action: Action,
 
     /// Load secret store from INPUT
-    #[clap(name = "INPUT")]
+    #[clap(name = "INPUT", parse(try_from_str = parse_input))]
     pub store: Option<Source>,
 
     /// Save the store to OUTPUT
-    #[clap(short, long, name = "OUTPUT")]
+    #[clap(short, long, name = "OUTPUT", parse(try_from_str = parse_output))]
     pub save: Option<Source>,
 }
 
@@ -129,31 +129,51 @@ impl std::str::FromStr for Path {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum Source {
     File(std::path::PathBuf),
     Directory(std::path::PathBuf),
     S3(String),
 }
 
-impl std::str::FromStr for Source {
-    type Err = anyhow::Error;
+fn parse_input(string: &str) -> anyhow::Result<Source> {
+    use std::str::FromStr;
 
-    fn from_str(string: &str) -> Result<Self, Self::Err> {
-        let trimmed = string.trim();
-        if let Some(path) = trimmed.strip_prefix("s3://") {
-            if path.is_empty() {
-                Err(anyhow::anyhow!("Invalid S3 path"))
-            } else {
-                Ok(Self::S3(String::from(path)))
-            }
+    let trimmed = string.trim();
+    if let Some(path) = trimmed.strip_prefix("s3://") {
+        if path.is_empty() {
+            Err(anyhow::anyhow!("Invalid S3 path"))
         } else {
-            let path = std::path::PathBuf::from_str(string)?;
-            if path.is_dir() {
-                Ok(Self::Directory(std::path::PathBuf::from_str(string)?))
-            } else {
-                Ok(Self::File(std::path::PathBuf::from_str(string)?))
-            }
+            Ok(Source::S3(String::from(path)))
+        }
+    } else {
+        let path = std::path::PathBuf::from_str(string)?;
+        if !path.exists() {
+            Err(anyhow::anyhow!("file does not exist"))
+        } else if path.is_dir() {
+            Ok(Source::Directory(std::path::PathBuf::from_str(string)?))
+        } else {
+            Ok(Source::File(std::path::PathBuf::from_str(string)?))
+        }
+    }
+}
+
+fn parse_output(string: &str) -> anyhow::Result<Source> {
+    use std::str::FromStr;
+
+    let trimmed = string.trim();
+    if let Some(path) = trimmed.strip_prefix("s3://") {
+        if path.is_empty() {
+            Err(anyhow::anyhow!("Invalid S3 path"))
+        } else {
+            Ok(Source::S3(String::from(path)))
+        }
+    } else {
+        let path = std::path::PathBuf::from_str(string)?;
+        if path.is_dir() || string.ends_with('/') || string.ends_with('\\') {
+            Ok(Source::Directory(std::path::PathBuf::from_str(string)?))
+        } else {
+            Ok(Source::File(std::path::PathBuf::from_str(string)?))
         }
     }
 }
@@ -199,6 +219,31 @@ mod tests {
         assert_eq!(
             super::parse_entry(r#"{"nested":{"inner":{"key":"value", "empty":{}}}}"#).unwrap(),
             Node::Branch(store)
+        );
+    }
+
+    #[test]
+    fn parse_output() {
+        assert_eq!(
+            super::parse_output("s3://foo/bar").unwrap(),
+            super::Source::S3(String::from("foo/bar"))
+        );
+
+        assert!(super::parse_output("s3://").is_err());
+
+        assert_eq!(
+            super::parse_output("./foo/bar").unwrap(),
+            super::Source::File(std::path::PathBuf::from("./foo/bar"))
+        );
+
+        assert_eq!(
+            super::parse_output("./foo/bar/").unwrap(),
+            super::Source::Directory(std::path::PathBuf::from("./foo/bar/"))
+        );
+
+        assert_eq!(
+            super::parse_output("c:\\foo\\bar\\").unwrap(),
+            super::Source::Directory(std::path::PathBuf::from("c:\\foo\\bar\\"))
         );
     }
 }
