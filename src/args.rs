@@ -3,40 +3,64 @@ use super::store;
 #[derive(clap::Clap, Debug)]
 #[clap(name = "Passify", version)]
 pub struct Args {
-    #[clap(subcommand)]
-    pub action: Action,
+    #[clap(subcommand, name = "ACTION")]
+    pub action: Option<Action>,
 
     /// Load secret store from INPUT
     #[clap(name = "INPUT", parse(try_from_str = parse_input))]
-    pub store: Option<Source>,
+    pub input: Option<Source>,
 
     /// Save the store to OUTPUT
-    #[clap(short, long, name = "OUTPUT", parse(try_from_str = parse_output))]
-    pub save: Option<Source>,
+    #[clap(short, long, name = "OUTPUT", parse(try_from_str = parse_output), conflicts_with("ACTION"))]
+    pub output: Option<Source>,
 }
 
 #[derive(clap::Clap, Debug)]
 pub enum Action {
-    /// Print the store in JSON format
-    Print(Print),
-
-    /// Create new secret
-    Create(Write),
+    /// Create a new secret
+    #[clap(visible_alias = "c")]
+    Create(Create),
 
     /// Read an existing secret
+    #[clap(visible_aliases = &["get", "r"])]
     Read(Read),
 
     /// Update an existing secret
-    Update(Write),
+    #[clap(visible_alias = "u")]
+    Update(Update),
 
     /// Delete an existing secret
+    #[clap(visible_alias = "d")]
     Delete(Delete),
+}
+
+impl Action {
+    pub fn should_save(&self) -> bool {
+        matches!(self, Self::Create(_) | Self::Update(_) | Self::Delete(_))
+    }
+}
+
+#[derive(clap::Clap, Debug)]
+pub struct Create {
+    /// Path to the secret
+    pub path: Path,
+
+    // /// Save the store to OUTPUT
+    // #[clap(short, long, name = "OUTPUT", parse(try_from_str = parse_output))]
+    // pub output: Option<Option<Source>>,
+    /// Value for the secret
+    #[clap(parse(try_from_str = parse_entry))]
+    pub secret: store::Node,
+
+    /// Force creation, even if the secret exists
+    #[clap(short, long)]
+    pub force: bool,
 }
 
 #[derive(clap::Clap, Debug)]
 pub struct Read {
     /// Path to the secret
-    pub path: Path,
+    pub path: Option<Path>,
 
     /// Pretty print
     #[clap(short, long)]
@@ -44,34 +68,33 @@ pub struct Read {
 }
 
 #[derive(clap::Clap, Debug)]
-pub struct Print {
-    /// Pretty print
-    #[clap(short, long)]
-    pub pretty: bool,
+pub struct Update {
+    /// Path to the secret
+    pub path: Path,
+
+    // /// Save the store to OUTPUT
+    // #[clap(short, long, name = "OUTPUT", parse(try_from_str = parse_output))]
+    // pub output: Option<Option<Source>>,
+    /// Value for the secret
+    #[clap(parse(try_from_str = parse_entry))]
+    pub secret: store::Node,
 }
 
 #[derive(clap::Clap, Debug)]
 pub struct Delete {
     /// Path to the secret
     pub path: Path,
-}
-
-#[derive(clap::Clap, Debug)]
-pub struct Write {
-    /// Path to the secret
-    pub path: Path,
-
-    /// Value for the secret
-    #[clap( parse(try_from_str = parse_entry))]
-    pub(super) secret: store::Node,
+    // /// Save the store to OUTPUT
+    // #[clap(short, long, name = "OUTPUT", parse(try_from_str = parse_output))]
+    // pub output: Option<Option<Source>>,
 }
 
 #[derive(Debug)]
 pub struct Path(pub Vec<String>);
 
-impl Path {
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &String> {
-        self.0.iter()
+impl AsRef<[String]> for Path {
+    fn as_ref(&self) -> &[String] {
+        &self.0
     }
 }
 

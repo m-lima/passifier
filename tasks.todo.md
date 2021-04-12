@@ -1,18 +1,28 @@
+- [ ] "-s" takes optional parameter. If none is given, sabe back using same source/password. If "-s" is missing completely, pipe. Piping can be binary, json, or pretty json
+  - [ ] Handle better the `save` in the main::match (I don't like it that each branch returns a save.. Only `read` doesnt save)
+- [ ] Support empty paths to refer to the whole store
+- [ ] Support `-f` to do an unchecked insert
 - [ ] Test with real fs
   - [ ] From/to file
   - [ ] From/to dir
+- [ ] Remove std::io::stdout() from main
 - [ ] Break down test into what it is actually asserting
 - [ ] Implement "S3"
 - [ ] Create, delete, update make no sense without output
 - [ ] Read, print make no sense with "--save"
 - [ ] Consider implement piping
+- [ ] Rucline frontend
 - [ ] QT frontend (check nheko as GUI for JS-style UI)
 - [ ] Web frontend
-- [ ] Remove panics
 - [ ] Slim down store
   - [ ] Move `delete_path` recursive logic into nested_map
   - [ ] Move `is_new_entry` recursive logic into nested_map
   - [ ] (?) Path iterator for nested map
+- [ ] Redesign
+  - [ ] Instead of nested have tags
+  - [ ] Allow multiple fields of basic types (only name and tags are fixed)
+  - [ ] Have a serach command (fuzzy) that searches all fields
+  - [ ] Allow printing to be usable in shell (maybe by specifying the field, the json shows pure string?)
 - [X] Implement "create"
 - [X] Dont create empty Nested
 - [X] Remove "delete_helper"
@@ -30,7 +40,4 @@
 - [X] Implement to directory
 - [X] Check overwrite
   - [X] When writing to dir, delete the root
-
-
-"-s" takes optional parameter. If none is given, sabe back using same source/password. If "-s" is missing completely, pipe. Piping can be binary, json, or pretty json
-
+- [X] Remove panics
